@@ -1,0 +1,4 @@
+/mnt/d/Classwork/CS4240/CS4240_Proj1/materials/cpp/build/CMakeFiles/ircpp.dir
+/mnt/d/Classwork/CS4240/CS4240_Proj1/materials/cpp/build/CMakeFiles/demo.dir
+/mnt/d/Classwork/CS4240/CS4240_Proj1/materials/cpp/build/CMakeFiles/edit_cache.dir
+/mnt/d/Classwork/CS4240/CS4240_Proj1/materials/cpp/build/CMakeFiles/rebuild_cache.dir
