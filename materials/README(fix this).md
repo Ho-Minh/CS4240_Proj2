@@ -1,5 +1,10 @@
 # Tiger-IR Helper Code & Interpreter
 
+Build with CMake:
+mkdir -p materials/cpp/build && cd materials/cpp/build
+cmake .. && cmake --build . --config Release
+Run demo: ./demo <input.ir> <output.ir>
+
 ## Build
 
 - Linux/macOS
