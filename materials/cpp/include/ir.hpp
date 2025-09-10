@@ -148,6 +148,42 @@ private:
     IRInterpreterStats stats;
 };
 
+// Control Flow Graph structures
+struct BasicBlock {
+    std::string id;
+    std::vector<std::shared_ptr<IRInstruction>> instructions;
+    std::vector<std::string> predecessors;
+    std::vector<std::string> successors;
+    
+    BasicBlock(const std::string& blockId) : id(blockId) {}
+};
+
+struct ControlFlowGraph {
+    std::unordered_map<std::string, std::shared_ptr<BasicBlock>> blocks;
+    std::string entryBlock;
+    std::vector<std::string> exitBlocks;
+    
+    void addBlock(std::shared_ptr<BasicBlock> block) {
+        blocks[block->id] = block;
+    }
+    
+    void addEdge(const std::string& from, const std::string& to) {
+        if (blocks.count(from) && blocks.count(to)) {
+            blocks[from]->successors.push_back(to);
+            blocks[to]->predecessors.push_back(from);
+        }
+    }
+};
+
+struct CFGBuilder {
+    static ControlFlowGraph buildCFG(const IRFunction& function);
+    static void printCFG(const ControlFlowGraph& cfg, std::ostream& os);
+    static void printCFGDot(const ControlFlowGraph& cfg, std::ostream& os);
+private:
+    static std::vector<std::shared_ptr<BasicBlock>> identifyBasicBlocks(const IRFunction& function);
+    static void buildEdges(ControlFlowGraph& cfg, const std::vector<std::shared_ptr<BasicBlock>>& blocks);
+};
+
 } // namespace ircpp
 
 

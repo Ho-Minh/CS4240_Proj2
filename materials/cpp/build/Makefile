@@ -57,10 +57,10 @@ RM = /usr/bin/cmake -E rm -f
 EQUALS = =
 
 # The top-level source directory on which CMake was run.
-CMAKE_SOURCE_DIR = /mnt/d/Classwork/CS4240/CS4240_Proj1/materials/cpp
+CMAKE_SOURCE_DIR = /mnt/d/Classwork/CS4240/CS4240_proj1/materials/cpp
 
 # The top-level build directory on which CMake was run.
-CMAKE_BINARY_DIR = /mnt/d/Classwork/CS4240/CS4240_Proj1/materials/cpp/build
+CMAKE_BINARY_DIR = /mnt/d/Classwork/CS4240/CS4240_proj1/materials/cpp/build
 
 #=============================================================================
 # Targets provided globally by CMake.
@@ -87,9 +87,9 @@ rebuild_cache/fast: rebuild_cache
 
 # The main all target
 all: cmake_check_build_system
-	$(CMAKE_COMMAND) -E cmake_progress_start /mnt/d/Classwork/CS4240/CS4240_Proj1/materials/cpp/build/CMakeFiles /mnt/d/Classwork/CS4240/CS4240_Proj1/materials/cpp/build//CMakeFiles/progress.marks
+	$(CMAKE_COMMAND) -E cmake_progress_start /mnt/d/Classwork/CS4240/CS4240_proj1/materials/cpp/build/CMakeFiles /mnt/d/Classwork/CS4240/CS4240_proj1/materials/cpp/build//CMakeFiles/progress.marks
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 all
-	$(CMAKE_COMMAND) -E cmake_progress_start /mnt/d/Classwork/CS4240/CS4240_Proj1/materials/cpp/build/CMakeFiles 0
+	$(CMAKE_COMMAND) -E cmake_progress_start /mnt/d/Classwork/CS4240/CS4240_proj1/materials/cpp/build/CMakeFiles 0
 .PHONY : all
 
 # The main clean target
@@ -142,6 +142,43 @@ demo/fast:
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/demo.dir/build.make CMakeFiles/demo.dir/build
 .PHONY : demo/fast
 
+#=============================================================================
+# Target rules for targets named cfg_demo
+
+# Build rule for target.
+cfg_demo: cmake_check_build_system
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 cfg_demo
+.PHONY : cfg_demo
+
+# fast build rule for target.
+cfg_demo/fast:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/cfg_demo.dir/build.make CMakeFiles/cfg_demo.dir/build
+.PHONY : cfg_demo/fast
+
+examples/cfg_demo.o: examples/cfg_demo.cpp.o
+.PHONY : examples/cfg_demo.o
+
+# target to build an object file
+examples/cfg_demo.cpp.o:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/cfg_demo.dir/build.make CMakeFiles/cfg_demo.dir/examples/cfg_demo.cpp.o
+.PHONY : examples/cfg_demo.cpp.o
+
+examples/cfg_demo.i: examples/cfg_demo.cpp.i
+.PHONY : examples/cfg_demo.i
+
+# target to preprocess a source file
+examples/cfg_demo.cpp.i:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/cfg_demo.dir/build.make CMakeFiles/cfg_demo.dir/examples/cfg_demo.cpp.i
+.PHONY : examples/cfg_demo.cpp.i
+
+examples/cfg_demo.s: examples/cfg_demo.cpp.s
+.PHONY : examples/cfg_demo.s
+
+# target to generate assembly for a file
+examples/cfg_demo.cpp.s:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/cfg_demo.dir/build.make CMakeFiles/cfg_demo.dir/examples/cfg_demo.cpp.s
+.PHONY : examples/cfg_demo.cpp.s
+
 examples/demo.o: examples/demo.cpp.o
 .PHONY : examples/demo.o
 
@@ -165,6 +202,30 @@ examples/demo.s: examples/demo.cpp.s
 examples/demo.cpp.s:
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/demo.dir/build.make CMakeFiles/demo.dir/examples/demo.cpp.s
 .PHONY : examples/demo.cpp.s
+
+src/ir_cfg.o: src/ir_cfg.cpp.o
+.PHONY : src/ir_cfg.o
+
+# target to build an object file
+src/ir_cfg.cpp.o:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/ircpp.dir/build.make CMakeFiles/ircpp.dir/src/ir_cfg.cpp.o
+.PHONY : src/ir_cfg.cpp.o
+
+src/ir_cfg.i: src/ir_cfg.cpp.i
+.PHONY : src/ir_cfg.i
+
+# target to preprocess a source file
+src/ir_cfg.cpp.i:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/ircpp.dir/build.make CMakeFiles/ircpp.dir/src/ir_cfg.cpp.i
+.PHONY : src/ir_cfg.cpp.i
+
+src/ir_cfg.s: src/ir_cfg.cpp.s
+.PHONY : src/ir_cfg.s
+
+# target to generate assembly for a file
+src/ir_cfg.cpp.s:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/ircpp.dir/build.make CMakeFiles/ircpp.dir/src/ir_cfg.cpp.s
+.PHONY : src/ir_cfg.cpp.s
 
 src/ir_core.o: src/ir_core.cpp.o
 .PHONY : src/ir_core.o
@@ -294,11 +355,18 @@ help:
 	@echo "... depend"
 	@echo "... edit_cache"
 	@echo "... rebuild_cache"
+	@echo "... cfg_demo"
 	@echo "... demo"
 	@echo "... ircpp"
+	@echo "... examples/cfg_demo.o"
+	@echo "... examples/cfg_demo.i"
+	@echo "... examples/cfg_demo.s"
 	@echo "... examples/demo.o"
 	@echo "... examples/demo.i"
 	@echo "... examples/demo.s"
+	@echo "... src/ir_cfg.o"
+	@echo "... src/ir_cfg.i"
+	@echo "... src/ir_cfg.s"
 	@echo "... src/ir_core.o"
 	@echo "... src/ir_core.i"
 	@echo "... src/ir_core.s"
