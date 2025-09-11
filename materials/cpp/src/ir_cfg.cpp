@@ -4,6 +4,58 @@
 
 using namespace ircpp;
 
+// Helper function to get display name for a block
+static std::string getBlockDisplayName(const std::shared_ptr<BasicBlock>& block) {
+    // If the block starts with a label instruction, use the label name
+    if (!block->instructions.empty() && 
+        block->instructions[0]->opCode == IRInstruction::OpCode::LABEL) {
+        auto labelOp = std::dynamic_pointer_cast<IRLabelOperand>(block->instructions[0]->operands[0]);
+        return labelOp->getName();
+    }
+    
+    // For other blocks, create a more descriptive name based on content
+    if (!block->instructions.empty()) {
+        const auto& lastInst = block->instructions.back();
+        switch (lastInst->opCode) {
+            case IRInstruction::OpCode::GOTO: {
+                auto labelOp = std::dynamic_pointer_cast<IRLabelOperand>(lastInst->operands[0]);
+                return "goto_" + labelOp->getName();
+            }
+            case IRInstruction::OpCode::BREQ: {
+                auto labelOp = std::dynamic_pointer_cast<IRLabelOperand>(lastInst->operands[0]);
+                return "breq_" + labelOp->getName();
+            }
+            case IRInstruction::OpCode::BRNEQ: {
+                auto labelOp = std::dynamic_pointer_cast<IRLabelOperand>(lastInst->operands[0]);
+                return "brneq_" + labelOp->getName();
+            }
+            case IRInstruction::OpCode::BRLT: {
+                auto labelOp = std::dynamic_pointer_cast<IRLabelOperand>(lastInst->operands[0]);
+                return "brlt_" + labelOp->getName();
+            }
+            case IRInstruction::OpCode::BRGT: {
+                auto labelOp = std::dynamic_pointer_cast<IRLabelOperand>(lastInst->operands[0]);
+                return "brgt_" + labelOp->getName();
+            }
+            case IRInstruction::OpCode::BRGEQ: {
+                auto labelOp = std::dynamic_pointer_cast<IRLabelOperand>(lastInst->operands[0]);
+                return "brgeq_" + labelOp->getName();
+            }
+            case IRInstruction::OpCode::RETURN:
+                return "return_block";
+            default:
+                break;
+        }
+    }
+    
+    // For entry blocks or other cases, use a more descriptive name
+    if (block->id.find("B") == 0) {
+        return "block_" + block->id.substr(1); // block_5, block_8, etc.
+    }
+    
+    return block->id; // Fallback to internal ID
+}
+
 std::vector<std::shared_ptr<BasicBlock>> CFGBuilder::identifyBasicBlocks(const IRFunction& function) {
     std::vector<std::shared_ptr<BasicBlock>> blocks;
     std::unordered_map<std::string, int> labelToBlockIndex;
@@ -17,20 +69,23 @@ std::vector<std::shared_ptr<BasicBlock>> CFGBuilder::identifyBasicBlocks(const I
         
         // Check if this is a label instruction
         if (inst->opCode == IRInstruction::OpCode::LABEL) {
-            // Save previous block if it exists
+            // Save previous block if it exists and is not empty
             if (currentBlock && !currentBlock->instructions.empty()) {
                 blocks.push_back(currentBlock);
             }
             
-            // Create new block for this label
+            // Create new block for this label, identified by line number
             auto labelOp = std::dynamic_pointer_cast<IRLabelOperand>(inst->operands[0]);
-            std::string blockId = labelOp->getName();
+            std::string blockId = "L" + std::to_string(inst->irLineNumber);
             currentBlock = std::make_shared<BasicBlock>(blockId);
-            labelToBlockIndex[blockId] = blocks.size();
+            
+            // Add the label instruction to the new block
+            currentBlock->instructions.push_back(inst);
+            labelToBlockIndex[labelOp->getName()] = blocks.size();
         } else {
-            // If no current block, create one
+            // If no current block, create one identified by line number
             if (!currentBlock) {
-                std::string blockId = "entry_" + std::to_string(blockCounter++);
+                std::string blockId = "B" + std::to_string(inst->irLineNumber);
                 currentBlock = std::make_shared<BasicBlock>(blockId);
             }
             
@@ -38,6 +93,7 @@ std::vector<std::shared_ptr<BasicBlock>> CFGBuilder::identifyBasicBlocks(const I
             currentBlock->instructions.push_back(inst);
             
             // Check if this instruction ends the basic block
+            // A basic block terminates on branch instructions or labels
             bool endsBlock = false;
             switch (inst->opCode) {
                 case IRInstruction::OpCode::GOTO:
@@ -69,9 +125,20 @@ std::vector<std::shared_ptr<BasicBlock>> CFGBuilder::identifyBasicBlocks(const I
 }
 
 void CFGBuilder::buildEdges(ControlFlowGraph& cfg, const std::vector<std::shared_ptr<BasicBlock>>& blocks) {
-    // Add all blocks to CFG
+    // Create a map from label names to block IDs for edge building
+    std::unordered_map<std::string, std::string> labelToBlockId;
+    
+    // Add all blocks to CFG and build label mapping
     for (const auto& block : blocks) {
         cfg.addBlock(block);
+        
+        // Find label instructions in this block to map label names to block IDs
+        for (const auto& inst : block->instructions) {
+            if (inst->opCode == IRInstruction::OpCode::LABEL) {
+                auto labelOp = std::dynamic_pointer_cast<IRLabelOperand>(inst->operands[0]);
+                labelToBlockId[labelOp->getName()] = block->id;
+            }
+        }
     }
     
     // Set entry block (first block)
@@ -80,15 +147,19 @@ void CFGBuilder::buildEdges(ControlFlowGraph& cfg, const std::vector<std::shared
     }
     
     // Build edges by analyzing control flow instructions
-    for (const auto& block : blocks) {
+    for (size_t i = 0; i < blocks.size(); ++i) {
+        const auto& block = blocks[i];
         if (block->instructions.empty()) continue;
         
         const auto& lastInst = block->instructions.back();
         
         switch (lastInst->opCode) {
             case IRInstruction::OpCode::GOTO: {
+                // GOTO only points to the target, no fall-through
                 auto labelOp = std::dynamic_pointer_cast<IRLabelOperand>(lastInst->operands[0]);
-                cfg.addEdge(block->id, labelOp->getName());
+                if (labelToBlockId.count(labelOp->getName())) {
+                    cfg.addEdge(block->id, labelToBlockId[labelOp->getName()]);
+                }
                 break;
             }
             case IRInstruction::OpCode::BREQ:
@@ -96,27 +167,27 @@ void CFGBuilder::buildEdges(ControlFlowGraph& cfg, const std::vector<std::shared
             case IRInstruction::OpCode::BRLT:
             case IRInstruction::OpCode::BRGT:
             case IRInstruction::OpCode::BRGEQ: {
+                // Branch instructions point to both the target and the next block
                 auto labelOp = std::dynamic_pointer_cast<IRLabelOperand>(lastInst->operands[0]);
-                cfg.addEdge(block->id, labelOp->getName());
+                if (labelToBlockId.count(labelOp->getName())) {
+                    cfg.addEdge(block->id, labelToBlockId[labelOp->getName()]);
+                }
                 
                 // Add fall-through edge to next block
-                auto it = std::find_if(blocks.begin(), blocks.end(),
-                    [&block](const std::shared_ptr<BasicBlock>& b) { return b->id == block->id; });
-                if (it != blocks.end() && std::next(it) != blocks.end()) {
-                    cfg.addEdge(block->id, (*std::next(it))->id);
+                if (i + 1 < blocks.size()) {
+                    cfg.addEdge(block->id, blocks[i + 1]->id);
                 }
                 break;
             }
             case IRInstruction::OpCode::RETURN: {
+                // RETURN doesn't point to any other block
                 cfg.exitBlocks.push_back(block->id);
                 break;
             }
             default: {
-                // Fall-through to next block
-                auto it = std::find_if(blocks.begin(), blocks.end(),
-                    [&block](const std::shared_ptr<BasicBlock>& b) { return b->id == block->id; });
-                if (it != blocks.end() && std::next(it) != blocks.end()) {
-                    cfg.addEdge(block->id, (*std::next(it))->id);
+                // All other instructions fall through to the next block
+                if (i + 1 < blocks.size()) {
+                    cfg.addEdge(block->id, blocks[i + 1]->id);
                 } else {
                     // This might be an exit block
                     cfg.exitBlocks.push_back(block->id);
@@ -141,28 +212,50 @@ ControlFlowGraph CFGBuilder::buildCFG(const IRFunction& function) {
 
 void CFGBuilder::printCFG(const ControlFlowGraph& cfg, std::ostream& os) {
     os << "=== Control Flow Graph for function ===" << std::endl;
-    os << "Entry block: " << cfg.entryBlock << std::endl;
+    
+    // Find and display entry block name
+    std::string entryDisplayName = "unknown";
+    if (cfg.blocks.count(cfg.entryBlock)) {
+        entryDisplayName = getBlockDisplayName(cfg.blocks.at(cfg.entryBlock));
+    }
+    os << "Entry block: " << entryDisplayName << std::endl;
+    
+    // Find and display exit block names
     os << "Exit blocks: ";
     for (size_t i = 0; i < cfg.exitBlocks.size(); ++i) {
         if (i > 0) os << ", ";
-        os << cfg.exitBlocks[i];
+        if (cfg.blocks.count(cfg.exitBlocks[i])) {
+            os << getBlockDisplayName(cfg.blocks.at(cfg.exitBlocks[i]));
+        } else {
+            os << cfg.exitBlocks[i];
+        }
     }
     os << std::endl << std::endl;
     
     // Print each basic block
     for (const auto& [blockId, block] : cfg.blocks) {
-        os << "Block: " << blockId << std::endl;
+        std::string displayName = getBlockDisplayName(block);
+        os << "Block: " << displayName << std::endl;
+        
         os << "  Predecessors: ";
         for (size_t i = 0; i < block->predecessors.size(); ++i) {
             if (i > 0) os << ", ";
-            os << block->predecessors[i];
+            if (cfg.blocks.count(block->predecessors[i])) {
+                os << getBlockDisplayName(cfg.blocks.at(block->predecessors[i]));
+            } else {
+                os << block->predecessors[i];
+            }
         }
         os << std::endl;
         
         os << "  Successors: ";
         for (size_t i = 0; i < block->successors.size(); ++i) {
             if (i > 0) os << ", ";
-            os << block->successors[i];
+            if (cfg.blocks.count(block->successors[i])) {
+                os << getBlockDisplayName(cfg.blocks.at(block->successors[i]));
+            } else {
+                os << block->successors[i];
+            }
         }
         os << std::endl;
         
@@ -207,7 +300,8 @@ void CFGBuilder::printCFGDot(const ControlFlowGraph& cfg, std::ostream& os) {
     
     // Add nodes
     for (const auto& [blockId, block] : cfg.blocks) {
-        os << "  \"" << blockId << "\" [label=\"" << blockId;
+        std::string displayName = getBlockDisplayName(block);
+        os << "  \"" << blockId << "\" [label=\"" << displayName;
         if (!block->instructions.empty()) {
             os << "\\n";
             for (const auto& inst : block->instructions) {

@@ -94,22 +94,33 @@ done:
         bool foundLoop = false;
         bool foundDone = false;
         bool foundBackEdge = false;
+        std::string loopBlockId, doneBlockId;
         
+        // Find blocks that contain the loop and done labels
         for (const auto& [blockId, block] : cfg.blocks) {
-            if (blockId == "loop") {
-                foundLoop = true;
-                std::cout << "  Found loop block: " << blockId << std::endl;
+            for (const auto& inst : block->instructions) {
+                if (inst->opCode == IRInstruction::OpCode::LABEL) {
+                    auto labelOp = std::dynamic_pointer_cast<IRLabelOperand>(inst->operands[0]);
+                    if (labelOp->getName() == "loop") {
+                        foundLoop = true;
+                        loopBlockId = blockId;
+                        std::cout << "  Found loop block: " << blockId << std::endl;
+                    }
+                    if (labelOp->getName() == "done") {
+                        foundDone = true;
+                        doneBlockId = blockId;
+                        std::cout << "  Found done block: " << blockId << std::endl;
+                    }
+                }
             }
-            if (blockId == "done") {
-                foundDone = true;
-                std::cout << "  Found done block: " << blockId << std::endl;
-            }
-            
-            // Check if any block has "loop" as a successor (back edge)
+        }
+        
+        // Check if any block has the loop block as a successor (back edge)
+        for (const auto& [blockId, block] : cfg.blocks) {
             for (const auto& successor : block->successors) {
-                if (successor == "loop") {
+                if (successor == loopBlockId) {
                     foundBackEdge = true;
-                    std::cout << "  Found back edge from " << blockId << " to loop" << std::endl;
+                    std::cout << "  Found back edge from " << blockId << " to " << loopBlockId << std::endl;
                     break;
                 }
             }
@@ -173,22 +184,48 @@ end:
             std::cout << "]" << std::endl;
         }
         
-        // Verify we have the expected blocks
-        assert(cfg.blocks.count("negative"));
-        assert(cfg.blocks.count("positive"));
-        assert(cfg.blocks.count("end"));
+        // Find blocks that contain the expected labels
+        std::string negativeBlockId, positiveBlockId, endBlockId;
+        bool foundNegative = false, foundPositive = false, foundEnd = false;
+        
+        for (const auto& [blockId, block] : cfg.blocks) {
+            for (const auto& inst : block->instructions) {
+                if (inst->opCode == IRInstruction::OpCode::LABEL) {
+                    auto labelOp = std::dynamic_pointer_cast<IRLabelOperand>(inst->operands[0]);
+                    if (labelOp->getName() == "negative") {
+                        foundNegative = true;
+                        negativeBlockId = blockId;
+                        std::cout << "  Found negative block: " << blockId << std::endl;
+                    }
+                    if (labelOp->getName() == "positive") {
+                        foundPositive = true;
+                        positiveBlockId = blockId;
+                        std::cout << "  Found positive block: " << blockId << std::endl;
+                    }
+                    if (labelOp->getName() == "end") {
+                        foundEnd = true;
+                        endBlockId = blockId;
+                        std::cout << "  Found end block: " << blockId << std::endl;
+                    }
+                }
+            }
+        }
+        
+        assert(foundNegative);
+        assert(foundPositive);
+        assert(foundEnd);
         
         // Verify control flow - check if any block has the expected edges
         bool hasNegativeEdge = false, hasPositiveEdge = false;
         for (const auto& [blockId, block] : cfg.blocks) {
             for (const auto& successor : block->successors) {
-                if (successor == "negative") {
+                if (successor == negativeBlockId) {
                     hasNegativeEdge = true;
-                    std::cout << "  Found edge from " << blockId << " to negative" << std::endl;
+                    std::cout << "  Found edge from " << blockId << " to " << negativeBlockId << std::endl;
                 }
-                if (successor == "positive") {
+                if (successor == positiveBlockId) {
                     hasPositiveEdge = true;
-                    std::cout << "  Found edge from " << blockId << " to positive" << std::endl;
+                    std::cout << "  Found edge from " << blockId << " to " << positiveBlockId << std::endl;
                 }
             }
         }

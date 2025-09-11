@@ -65,9 +65,9 @@ echo "CFG Testing completed successfully!"
 echo "========================================"
 echo
 echo "Generated DOT files:"
-echo "- example_cfg.dot"
-echo "- sqrt_cfg.dot"
-echo "- quicksort_cfg.dot"
+echo "- example_cfg.dot (combined CFG for all functions)"
+echo "- sqrt_cfg.dot (combined CFG for all functions)"
+echo "- quicksort_cfg.dot (combined CFG for all functions)"
 echo
 echo "To visualize CFGs (requires graphviz 'dot'):"
 echo "  dot -Tpng example_cfg.dot -o example_cfg.png"
