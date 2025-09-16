@@ -82,6 +82,7 @@ std::unordered_map<std::string, BasicBlockReachingDef> computeReachingDefs(const
                 changed = true;
             }
         }
+        res = next_res;  // CRITICAL: Update res with next_res
     } while(changed);
     return res;
 }
