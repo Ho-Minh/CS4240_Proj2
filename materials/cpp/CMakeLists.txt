@@ -12,7 +12,8 @@ add_library(ircpp
     src/ir_operands.cpp
     src/ir_reader.cpp
     src/ir_interpreter.cpp
-    src/ir_cfg.cpp)
+    src/ir_cfg.cpp
+        src/reaching_def.cpp)
 
 add_executable(demo examples/demo.cpp)
 target_link_libraries(demo ircpp)

@@ -3,6 +3,8 @@
 #include <fstream>
 #include <set>
 
+#include "reaching_def.hpp"
+
 using namespace ircpp;
 
 // Helper function to get display name for a block
@@ -87,6 +89,8 @@ int main(int argc, char** argv) {
             // Print CFG in text format
             CFGBuilder::printCFG(cfg, std::cout);
         }
+
+        ReachingDefOut reachingDefs = computeReachingDefs(functionCFGs);
 
         // Generate combined DOT file if output file specified
         if (argc >= 3) {
