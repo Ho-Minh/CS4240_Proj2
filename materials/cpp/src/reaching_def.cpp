@@ -38,13 +38,13 @@ GenKill computeGenKillBlock(const ircpp::ControlFlowGraph &cfg) {
         for(auto &instr : block->instructions) {
             if(auto defVar = getDefVar(*instr)) {
                 res.gen[block_name].insert(instr->irLineNumber);
+                // Kill all other definitions of the same variable
                 for(auto line : defsByVar[*defVar]) {
-                    res.kill[block_name].insert(line);
+                    if(line != instr->irLineNumber) {
+                        res.kill[block_name].insert(line);
+                    }
                 }
             }
-        }
-        for(auto line : res.gen[block_name]) {
-            res.kill[block_name].erase(line);
         }
     }
     return res;
@@ -62,13 +62,10 @@ std::unordered_map<std::string, BasicBlockReachingDef> computeReachingDefs(const
         changed = false;
         std::unordered_map<std::string, BasicBlockReachingDef> next_res;
         for(auto &[block_name, block] : cfg.blocks) {
-            next_res[block_name].in = res[block_name].in;
+            next_res[block_name].in = {};
             for(auto pred : block->predecessors) {
                 for(auto out_elem : res[pred].out) {
-                    if(!next_res[block_name].in.count(out_elem)) {
-                        changed = true;
-                        next_res[block_name].in.insert(out_elem);
-                    }
+                    next_res[block_name].in.insert(out_elem);
                 }
             }
             next_res[block_name].out = next_res[block_name].in;
@@ -78,7 +75,7 @@ std::unordered_map<std::string, BasicBlockReachingDef> computeReachingDefs(const
             for(auto gen_elem : genKill.gen[block_name]) {
                 next_res[block_name].out.insert(gen_elem);
             }
-            if(!changed && next_res[block_name].out != res[block_name].out) {
+            if(next_res[block_name].out != res[block_name].out) {
                 changed = true;
             }
         }

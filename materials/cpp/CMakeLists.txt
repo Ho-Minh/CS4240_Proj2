@@ -20,4 +20,7 @@ add_library(ircpp
 add_executable(ir_optimizer build/ir_optimizer_demo.cpp)
 target_link_libraries(ir_optimizer ircpp)
 
+add_executable(cfg_test src/cfg_test.cpp)
+target_link_libraries(cfg_test ircpp)
+
 

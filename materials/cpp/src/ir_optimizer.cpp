@@ -237,28 +237,6 @@ void IROptimizer::writeOptimizedProgramNewFormat(const ircpp::IRProgram& optimiz
     file.close();
 }
 
-IROptimizer::OptimizationStats IROptimizer::getOptimizationStats(const ircpp::IRProgram& original, const ircpp::IRProgram& optimized) {
-    OptimizationStats stats;
-    
-    // Count original instructions
-    for (const auto& func : original.functions) {
-        stats.originalInstructions += func->instructions.size();
-    }
-    
-    // Count optimized instructions
-    for (const auto& func : optimized.functions) {
-        stats.optimizedInstructions += func->instructions.size();
-    }
-    
-    stats.eliminatedInstructions = stats.originalInstructions - stats.optimizedInstructions;
-    
-    if (stats.originalInstructions > 0) {
-        stats.optimizationPercentage = (double)stats.eliminatedInstructions / stats.originalInstructions * 100.0;
-    }
-    
-    return stats;
-}
-
 std::vector<std::shared_ptr<ircpp::IRInstruction>> IROptimizer::eliminateDeadInstructions(
     const std::vector<std::shared_ptr<ircpp::IRInstruction>>& instructions,
     const std::unordered_set<int>& deadInstructions) {

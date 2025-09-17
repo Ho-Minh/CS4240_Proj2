@@ -22,15 +22,6 @@ public:
     // Write optimized program using new format (fallback)
     static void writeOptimizedProgramNewFormat(const ircpp::IRProgram& optimizedProgram, const std::string& filename);
     
-    // Get optimization statistics
-    struct OptimizationStats {
-        int originalInstructions = 0;
-        int optimizedInstructions = 0;
-        int eliminatedInstructions = 0;
-        double optimizationPercentage = 0.0;
-    };
-    
-    static OptimizationStats getOptimizationStats(const ircpp::IRProgram& original, const ircpp::IRProgram& optimized);
 
 private:
     // Helper functions
