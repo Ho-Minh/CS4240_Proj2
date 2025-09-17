@@ -17,19 +17,19 @@ DeadCodeResult analyzeDeadCode(const std::vector<ircpp::ControlFlowGraph> &funct
         const auto& funcReachingDefs = reachingDefs[funcIdx];
 
         //Print funcReachingDefs
-        std::cout << "Function " << funcIdx << " reaching defs: " << std::endl;
-        for (const auto& [blockName, block] : cfg.blocks) {
-            std::cout << "Block " << blockName << ": " << std::endl;
-            //I need to print a few instructions in this block so I know which one it is
-            for (const auto& instr : block->instructions) {
-                std::cout << instr->irLineNumber << ", ";
-            }
-            std::cout << std::endl;
-            for (const auto& def : funcReachingDefs.at(blockName).in) {
-                std::cout << def << ", ";
-            }
-            std::cout << std::endl;
-        }
+        // std::cout << "Function " << funcIdx << " reaching defs: " << std::endl;
+        // for (const auto& [blockName, block] : cfg.blocks) {
+        //     std::cout << "Block " << blockName << ": " << std::endl;
+        //     //I need to print a few instructions in this block so I know which one it is
+        //     for (const auto& instr : block->instructions) {
+        //         std::cout << instr->irLineNumber << ", ";
+        //     }
+        //     std::cout << std::endl;
+        //     for (const auto& def : funcReachingDefs.at(blockName).in) {
+        //         std::cout << def << ", ";
+        //     }
+        //     std::cout << std::endl;
+        // }
 
          DeadCodeAnalysis analysis;
 
@@ -50,60 +50,90 @@ DeadCodeResult analyzeDeadCode(const std::vector<ircpp::ControlFlowGraph> &funct
          while (!workList.empty()) {
             ircpp::IRInstruction i = workList.front();
             workList.pop();
+            std::cout << "Current instruction: " << i.irLineNumber << std::endl;
             //Case 1: If there's a def that reaches i in the same block, mark that def, continue
             std::string currentBlock = blockNameMap[i.irLineNumber];
-            bool hasSameBlockDef = false;
-            for (const auto& instr : cfg.blocks.at(currentBlock)->instructions) {
-                bool definesUsedVar = false;
-                if (instr->operands.size() > 0 && isDefiningInstruction(instr->opCode)) {
-                    std::string definedVar = instr->operands[0]->value;
-                    // Check if i uses this variable
-                    for (const auto& operand : i.operands) {
-                        if (operand->value == definedVar) {
-                            definesUsedVar = true;
-                            break;
-                        }
-                    }
-                }
-                if (definesUsedVar && instr->irLineNumber < i.irLineNumber) {
-                    if (!marked.count(instr->irLineNumber)) {
-                        marked.insert(instr->irLineNumber);
-                        workList.push(*instr);
-                    }
-                    hasSameBlockDef = true;
+            std::unordered_set<std::string> coveredOperandsInSameBlock;
+
+            int pos = -1;
+
+            for (int j = 0; j < cfg.blocks.at(currentBlock)->instructions.size(); j++) {
+                if (cfg.blocks.at(currentBlock)->instructions.at(j)->irLineNumber == i.irLineNumber) {
+                    pos = j;
                     break;
                 }
             }
-            if (hasSameBlockDef) {
-                continue;
-            }
-            //Case 2: If there's a def that reaches i in another block, mark that def, continue
-            for (const auto& [blockName, block] : cfg.blocks) {
-                if (blockName == currentBlock) {
-                    continue;
-                }
-                for (const auto& instr : block->instructions) {
-                    // Check if instruction j defines variables that are used by instruction i
-                    bool definesUsedVar = false;
-                    // Check if instr defines a variable that i uses
-                    // Only check instructions that actually define variables
-                    if (instr->operands.size() > 0 && isDefiningInstruction(instr->opCode)) {
-                        std::string definedVar = instr->operands[0]->value;
-                        // Check if i uses this variable
-                        for (const auto& operand : i.operands) {
-                            if (operand->value == definedVar) {
-                                definesUsedVar = true;
-                                break;
-                            }
+            
+            for (int j = pos - 1; j >= 0; j--) {
+                auto instr = cfg.blocks.at(currentBlock)->instructions.at(j);
+                if (instr->operands.size() > 0 && isDefiningInstruction(instr->opCode)) {
+                    std::string definedVar = instr->operands[0]->value;
+                    
+                    // Check if i uses this variable and we haven't covered this operand yet
+                    bool usesThisVar = false;
+                    for (int j = 1; j < i.operands.size(); j++) {
+                        auto operand = i.operands[j];
+                        if (operand->value == definedVar && !coveredOperandsInSameBlock.count(definedVar)) {
+                            usesThisVar = true;
+                            break;
                         }
                     }
                     
-                    if (definesUsedVar) {
-                        // Check if this definition reaches i (check reaching defs)
-                        if (funcReachingDefs.at(currentBlock).in.count(instr->irLineNumber)) {
-                            if (!marked.count(instr->irLineNumber)) {
-                                marked.insert(instr->irLineNumber);
-                                workList.push(*instr);
+                    if (usesThisVar && instr->irLineNumber < i.irLineNumber) {
+                        if (!marked.count(instr->irLineNumber)) {
+                            std::cout << "Marking instruction: " << instr->irLineNumber << std::endl;
+                            marked.insert(instr->irLineNumber);
+                            workList.push(*instr);
+                        }
+                        coveredOperandsInSameBlock.insert(definedVar);
+                    }
+                }
+            }
+            if (i.irLineNumber == 47) {
+                std::cout << "Covered operands: ";
+                for (const auto& x: coveredOperandsInSameBlock) {
+                    std::cout << x << ", ";
+                }
+                std::cout << std::endl;
+                std::cout << "Needed operands: ";
+                for (int j = 1; j < i.operands.size(); j++) {
+                    auto operand = i.operands[j];
+                    std::cout << operand->value << ", ";
+                }
+                std::cout << std::endl;
+            }
+            //Case 2: If there's a def that reaches i in another block, mark that def, continue
+            for (const auto& [blockName, block] : cfg.blocks) {
+                // if (blockName == currentBlock) {
+                //     continue;
+                // }
+                for (const auto& instr : block->instructions) {
+                    // Check if instruction j defines variables that are used by instruction i
+                    // Only check instructions that actually define variables
+                    if (instr->irLineNumber == i.irLineNumber) {
+                        continue;
+                    }
+                    if (isDefiningInstruction(instr->opCode)) {
+                        std::string definedVar = instr->operands[0]->value;
+                        
+                        // Check if i uses this variable and we haven't covered this operand yet
+                        bool usesThisVar = false;
+                        for (int j = 1; j < i.operands.size(); j++) {
+                            auto operand = i.operands[j];
+                            if (operand->value == definedVar) {
+                                usesThisVar = true;
+                                break;
+                            }
+                        }
+                        
+                        if (usesThisVar) {
+                            // Check if this definition reaches i (check reaching defs)
+                            if (funcReachingDefs.at(currentBlock).in.count(instr->irLineNumber)) {
+                                if (!marked.count(instr->irLineNumber) && !coveredOperandsInSameBlock.count(definedVar)) {
+                                    std::cout << "Marking instruction: " << instr->irLineNumber << std::endl;
+                                    marked.insert(instr->irLineNumber);
+                                    workList.push(*instr);
+                                }
                             }
                         }
                     }
