@@ -1,2 +1,0 @@
-/usr/bin/ar qc libircpp.a CMakeFiles/ircpp.dir/src/ir_core.cpp.o CMakeFiles/ircpp.dir/src/ir_types.cpp.o CMakeFiles/ircpp.dir/src/ir_operands.cpp.o CMakeFiles/ircpp.dir/src/ir_reader.cpp.o CMakeFiles/ircpp.dir/src/ir_interpreter.cpp.o
-/usr/bin/ranlib libircpp.a
