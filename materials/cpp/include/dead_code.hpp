@@ -8,7 +8,7 @@
 #include "ir.hpp"
 #include "reaching_def.hpp"
 
-bool isCritical(ircpp::IRInstruction::OpCode opCode);
+bool isCritical(ircpp::IRInstruction::OpCode opCode, ircpp::IRInstruction* inst);
 
 bool isDefiningInstruction(ircpp::IRInstruction::OpCode opCode);
 

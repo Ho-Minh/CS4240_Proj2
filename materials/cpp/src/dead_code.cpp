@@ -23,7 +23,7 @@ DeadCodeResult analyzeDeadCode(const std::vector<ircpp::ControlFlowGraph> &funct
          for (const auto& [blockName, block] : cfg.blocks) {
             for (const auto& instr : block->instructions) {
                 blockNameMap[instr->irLineNumber] = blockName;
-                if (isCritical(instr->opCode)) {
+                if (isCritical(instr->opCode, instr.get())) {
                     marked.insert(instr->irLineNumber);
                     if (instr->opCode != ircpp::IRInstruction::OpCode::LABEL) {
                         workList.push(*instr);
@@ -130,7 +130,6 @@ DeadCodeResult analyzeDeadCode(const std::vector<ircpp::ControlFlowGraph> &funct
 }
 
 bool isDefiningInstruction(ircpp::IRInstruction::OpCode opCode) {
-
     return opCode == ircpp::IRInstruction::OpCode::ASSIGN ||
            opCode == ircpp::IRInstruction::OpCode::ADD ||
            opCode == ircpp::IRInstruction::OpCode::SUB ||
@@ -141,7 +140,12 @@ bool isDefiningInstruction(ircpp::IRInstruction::OpCode opCode) {
            opCode == ircpp::IRInstruction::OpCode::ARRAY_LOAD;
 }
 
-bool isCritical(ircpp::IRInstruction::OpCode opCode) {
+//Fix isCritical, since assignment for array is critical, so have to check for that
+//Take in an instruction, if it's any of the other things, it's critical
+//If it's an assignment, check if number of operands is greater than 2 then it's critical
+//The second parameter is optional, if not provided, then it's not an assignment
+
+bool isCritical(ircpp::IRInstruction::OpCode opCode, ircpp::IRInstruction* inst) {
     return opCode == ircpp::IRInstruction::OpCode::LABEL ||
            opCode == ircpp::IRInstruction::OpCode::GOTO ||
            opCode == ircpp::IRInstruction::OpCode::BREQ ||
@@ -152,5 +156,6 @@ bool isCritical(ircpp::IRInstruction::OpCode opCode) {
            opCode == ircpp::IRInstruction::OpCode::RETURN ||
            opCode == ircpp::IRInstruction::OpCode::CALL ||
            opCode == ircpp::IRInstruction::OpCode::CALLR ||
-           opCode == ircpp::IRInstruction::OpCode::ARRAY_STORE;
+           opCode == ircpp::IRInstruction::OpCode::ARRAY_STORE ||
+           (opCode == ircpp::IRInstruction::OpCode::ASSIGN && inst && inst->operands.size() > 2);
 }
