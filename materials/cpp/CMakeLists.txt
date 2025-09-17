@@ -17,7 +17,7 @@ add_library(ircpp
     src/dead_code.cpp
     src/ir_optimizer.cpp)
 
-add_executable(ir_optimizer build/ir_optimizer_demo.cpp)
+add_executable(ir_optimizer src/ir_optimizer_demo.cpp)
 target_link_libraries(ir_optimizer ircpp)
 
 add_executable(cfg_test src/cfg_test.cpp)
