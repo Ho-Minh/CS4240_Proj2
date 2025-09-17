@@ -9,9 +9,7 @@ include_directories(${CMAKE_SOURCE_DIR}/include)
 add_library(ircpp
     src/ir_core.cpp
     src/ir_types.cpp
-    src/ir_operands.cpp
     src/ir_reader.cpp
-    src/ir_interpreter.cpp
     src/ir_cfg.cpp
     src/reaching_def.cpp
     src/dead_code.cpp
