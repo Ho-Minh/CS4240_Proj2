@@ -137,4 +137,7 @@ namespace Registers {
     inline auto zero() { return std::make_shared<Register>("zero"); }
 }
 
+// Helper function to convert MIPSOp enum to string
+std::string opToString(MIPSOp op);
+
 } // namespace ircpp
