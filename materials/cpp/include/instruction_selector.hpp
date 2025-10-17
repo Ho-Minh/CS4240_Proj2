@@ -63,7 +63,7 @@ private:
     std::unordered_map<IRInstruction::OpCode, std::unique_ptr<InstructionSelector>> selectors;
     
 public:
-    SelectorRegistry();
+    SelectorRegistry() = default;
     ~SelectorRegistry() = default;
     
     // TODO: Implement selector registration

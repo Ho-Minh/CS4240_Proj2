@@ -71,6 +71,7 @@ std::string MIPSInstruction::toString() const {
         ans = label + ": ";
     }
     ans = ans + opToString(op);
+    if (!operands.empty()) ans = ans + " ";
     for (int i = 0; i < (int)operands.size(); i++) {
         if (i > 0) ans = ans + ", ";
         ans = ans + operands[i]->toString();

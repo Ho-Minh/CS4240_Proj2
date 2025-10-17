@@ -8,6 +8,7 @@
 #include "mips_instructions.hpp"
 #include "register_manager.hpp"
 
+
 // ============================================================================
 // UNIT TEST FUNCTIONS FOR INDIVIDUAL COMPONENTS
 // ============================================================================
@@ -436,88 +437,167 @@ void testCallSelector() {
 // MAIN INSTRUCTION SELECTOR TESTS
 // ============================================================================
 
-void testInstructionSelector() {
-    std::cout << "\n" << std::string(60, '=') << std::endl;
-    std::cout << "TESTING MAIN INSTRUCTION SELECTOR" << std::endl;
-    std::cout << std::string(60, '=') << std::endl;
-    
-    ircpp::IRToMIPSSelector selector;
-    
-    // Test 1: Simple program with multiple instruction types
-    std::cout << "\n--- Test 1: Simple Program Conversion ---" << std::endl;
-    
-    // Create a simple test program
-    ircpp::IRProgram testProgram;
-    auto testFunction = std::make_shared<ircpp::IRFunction>(
-        "test_func",
-        ircpp::IRIntType::get(),
-        std::vector<std::shared_ptr<ircpp::IRVariableOperand>>(), // no parameters
-        std::vector<std::shared_ptr<ircpp::IRVariableOperand>>(), // no local variables
-        std::vector<std::shared_ptr<ircpp::IRInstruction>>()
-    );
-    
-    // Add some test instructions
-    testFunction->instructions.push_back(
-        TestHelpers::createIRInstruction(ircpp::IRInstruction::OpCode::ASSIGN, {"%x", "10"}));
-    testFunction->instructions.push_back(
-        TestHelpers::createIRInstruction(ircpp::IRInstruction::OpCode::ASSIGN, {"%y", "20"}));
-    testFunction->instructions.push_back(
-        TestHelpers::createIRInstruction(ircpp::IRInstruction::OpCode::ADD, {"%z", "%x", "%y"}));
-    testFunction->instructions.push_back(
-        TestHelpers::createIRInstruction(ircpp::IRInstruction::OpCode::RETURN, {"%z"}));
-    
-    testProgram.functions.push_back(testFunction);
-    
-    try {
-        auto mipsInstructions = selector.selectProgram(testProgram);
-        TestHelpers::printMIPSInstructions(mipsInstructions, "Simple Program");
-        
-        // Test assembly generation
-        std::cout << "\n--- Test 2: Assembly Generation ---" << std::endl;
-        std::string assembly = selector.generateAssembly(mipsInstructions);
-        std::cout << "Generated Assembly:" << std::endl;
-        std::cout << assembly << std::endl;
-        
-    } catch (const std::exception& e) {
-        std::cout << "Error in program conversion: " << e.what() << std::endl;
-    }
-    
-    // Test 3: Function with control flow
-    std::cout << "\n--- Test 3: Function with Control Flow ---" << std::endl;
-    auto controlFlowFunction = std::make_shared<ircpp::IRFunction>(
-        "control_flow_func",
-        ircpp::IRIntType::get(),
-        std::vector<std::shared_ptr<ircpp::IRVariableOperand>>(),
-        std::vector<std::shared_ptr<ircpp::IRVariableOperand>>(),
-        std::vector<std::shared_ptr<ircpp::IRInstruction>>()
-    );
-    
-    // Add control flow instructions
-    controlFlowFunction->instructions.push_back(
-        TestHelpers::createIRInstruction(ircpp::IRInstruction::OpCode::ASSIGN, {"%i", "0"}));
-    controlFlowFunction->instructions.push_back(
-        TestHelpers::createIRInstruction(ircpp::IRInstruction::OpCode::LABEL, {"L1"}));
-    controlFlowFunction->instructions.push_back(
-        TestHelpers::createIRInstruction(ircpp::IRInstruction::OpCode::BREQ, {"%i", "10", "L2"}));
-    controlFlowFunction->instructions.push_back(
-        TestHelpers::createIRInstruction(ircpp::IRInstruction::OpCode::ADD, {"%i", "%i", "1"}));
-    controlFlowFunction->instructions.push_back(
-        TestHelpers::createIRInstruction(ircpp::IRInstruction::OpCode::GOTO, {"L1"}));
-    controlFlowFunction->instructions.push_back(
-        TestHelpers::createIRInstruction(ircpp::IRInstruction::OpCode::LABEL, {"L2"}));
-    controlFlowFunction->instructions.push_back(
-        TestHelpers::createIRInstruction(ircpp::IRInstruction::OpCode::RETURN, {"%i"}));
-    
-    ircpp::IRProgram controlFlowProgram;
-    controlFlowProgram.functions.push_back(controlFlowFunction);
-    
-    try {
-        auto controlFlowMIPS = selector.selectProgram(controlFlowProgram);
-        TestHelpers::printMIPSInstructions(controlFlowMIPS, "Control Flow Program");
-    } catch (const std::exception& e) {
-        std::cout << "Error in control flow conversion: " << e.what() << std::endl;
+#include <cassert>
+#include <regex>
+#include <string>
+
+// ---------- helpers ----------
+static void assertHas(const std::string& hay, const std::string& needle) {
+    if (hay.find(needle) == std::string::npos) {
+        std::cerr << "Missing literal: " << needle << "\n"; std::abort();
     }
 }
+static void assertLineRegex(const std::string& text, const std::string& core) {
+    // allow start-of-text or newline, then any indentation, then the pattern
+    std::regex re("(^|\\n)\\s*" + core, std::regex::icase);
+    if (!std::regex_search(text.begin(), text.end(), re)) {
+        std::cerr << "Line regex failed: /" << core << "/\n"; std::abort();
+    }
+}
+static void assertRegexAnywhere(const std::string& text, const std::string& core) {
+    std::regex re(core, std::regex::icase);
+    if (!std::regex_search(text.begin(), text.end(), re)) {
+        std::cerr << "Regex failed: /" << core << "/\n"; std::abort();
+    }
+}
+// ---------- end helpers ----------
+
+void testInstructionSelector() {
+    std::cout << "\n" << std::string(60, '=') << "\n"
+              << "TESTING MAIN INSTRUCTION SELECTOR\n"
+              << std::string(60, '=') << std::endl;
+
+    ircpp::IRToMIPSSelector selector;
+
+    // =============================
+    // Test 1: Simple arith + return
+    // =============================
+    {
+        ircpp::IRProgram p;
+        auto f = std::make_shared<ircpp::IRFunction>(
+            "test_func", ircpp::IRIntType::get(),
+            std::vector<std::shared_ptr<ircpp::IRVariableOperand>>{},
+            std::vector<std::shared_ptr<ircpp::IRVariableOperand>>{},
+            std::vector<std::shared_ptr<ircpp::IRInstruction>>{}
+        );
+
+        f->instructions.push_back(TestHelpers::createIRInstruction(ircpp::IRInstruction::OpCode::ASSIGN, {"%x", "10"}));
+        f->instructions.push_back(TestHelpers::createIRInstruction(ircpp::IRInstruction::OpCode::ASSIGN, {"%y", "20"}));
+        f->instructions.push_back(TestHelpers::createIRInstruction(ircpp::IRInstruction::OpCode::ADD,    {"%z", "%x", "%y"}));
+        f->instructions.push_back(TestHelpers::createIRInstruction(ircpp::IRInstruction::OpCode::RETURN, {"%z"}));
+        p.functions.push_back(f);
+
+        auto mips = selector.selectProgram(p);
+        assert(!mips.empty());
+        auto asmTxt = selector.generateAssembly(mips);
+
+        std::cout << asmTxt << std::endl;
+
+        // Function label on first instruction line
+        assertHas(asmTxt, "test_func:");
+
+        // Prologue: alloc, saves, set fp
+        assertRegexAnywhere(asmTxt, R"(addi(u)?\s+\$sp,\s*\$sp,\s*-\d+)");
+        assertLineRegex(asmTxt, R"(sw\s+\$\w+,\s*\d+\(\$sp\))"); // at least one store somewhere
+        assertLineRegex(asmTxt, R"((move\s+\$fp,\s*\$sp)|(addu\s+\$fp,\s*\$sp,\s*\$zero))");
+
+        // Body: we should see immediate materialization(s) and an add
+        // (allow li or addi(u) $reg,$zero,imm)
+        assertLineRegex(asmTxt, R"((li\s+\$\w+,\s*-?\d+)|(addi(u)?\s+\$\w+,\s*\$zero,\s*-?\d+))");
+        assertLineRegex(asmTxt, R"(add\s+\$\w+,\s*\$\w+,\s*\$\w+)");
+
+        // Epilogue: loads, dealloc, jr $ra
+        assertLineRegex(asmTxt, R"(lw\s+\$\w+,\s*\d+\(\$sp\))");
+        assertLineRegex(asmTxt, R"(addi(u)?\s+\$sp,\s*\$sp,\s*\d+)");
+        assertLineRegex(asmTxt, R"(jr\s+\$ra\b)");
+
+        // Sanity: $fp and $ra saved/restored once (not strictly required, but catches regressions)
+        auto count = [&](const std::string& needle){
+            size_t pos = 0, c = 0;
+            while ((pos = asmTxt.find(needle, pos)) != std::string::npos) { ++c; ++pos; }
+            return c;
+        };
+        assert(count("\nsw $fp,") <= 1 && "fp saved more than once");
+        assert(count("\nsw $ra,") <= 1 && "ra saved more than once");
+        assert(count("\nlw $fp,") <= 1 && "fp restored more than once");
+        assert(count("\nlw $ra,") <= 1 && "ra restored more than once");
+    }
+
+    // =================================
+    // Test 2: Control flow (loop/branch)
+    // =================================
+    {
+        ircpp::IRProgram p;
+        auto f = std::make_shared<ircpp::IRFunction>(
+            "control_flow_func", ircpp::IRIntType::get(),
+            std::vector<std::shared_ptr<ircpp::IRVariableOperand>>{},
+            std::vector<std::shared_ptr<ircpp::IRVariableOperand>>{},
+            std::vector<std::shared_ptr<ircpp::IRInstruction>>{}
+        );
+
+        f->instructions.push_back(TestHelpers::createIRInstruction(ircpp::IRInstruction::OpCode::ASSIGN, {"%i", "0"}));
+        f->instructions.push_back(TestHelpers::createIRInstruction(ircpp::IRInstruction::OpCode::LABEL,  {"L1"}));
+        f->instructions.push_back(TestHelpers::createIRInstruction(ircpp::IRInstruction::OpCode::BREQ,   {"%i", "10", "L2"}));
+        f->instructions.push_back(TestHelpers::createIRInstruction(ircpp::IRInstruction::OpCode::ADD,    {"%i", "%i", "1"}));
+        f->instructions.push_back(TestHelpers::createIRInstruction(ircpp::IRInstruction::OpCode::GOTO,   {"L1"}));
+        f->instructions.push_back(TestHelpers::createIRInstruction(ircpp::IRInstruction::OpCode::LABEL,  {"L2"}));
+        f->instructions.push_back(TestHelpers::createIRInstruction(ircpp::IRInstruction::OpCode::RETURN, {"%i"}));
+        p.functions.push_back(f);
+
+        auto mips = selector.selectProgram(p);
+        assert(!mips.empty());
+        auto asmTxt = selector.generateAssembly(mips);
+
+        assertHas(asmTxt, "control_flow_func:");
+
+        // Expect at least one label line of the mangled form (allow dots / digits)
+        assertRegexAnywhere(asmTxt, R"((^|\n)[A-Za-z_.$][\w.$]*:\s)");
+
+        // Expect BEQ and a target token (not just \w)
+        assertLineRegex(asmTxt, R"(beq\s+\$\w+,\s*\$\w+,\s*\S+)");
+
+        // Expect an unconditional jump for GOTO (j or b)
+        assertLineRegex(asmTxt, R"((^|\n)\s*(j|b)\s+\S+)");
+
+        // Return path present
+        assertLineRegex(asmTxt, R"(jr\s+\$\w+)");
+    }
+
+    // ==========================
+    // Test 3: Memory operations
+    // ==========================
+    {
+        ircpp::IRProgram p;
+        auto f = std::make_shared<ircpp::IRFunction>(
+            "memory_func", ircpp::IRIntType::get(),
+            std::vector<std::shared_ptr<ircpp::IRVariableOperand>>{},
+            std::vector<std::shared_ptr<ircpp::IRVariableOperand>>{},
+            std::vector<std::shared_ptr<ircpp::IRInstruction>>{}
+        );
+
+        f->instructions.push_back(TestHelpers::createIRInstruction(ircpp::IRInstruction::OpCode::ASSIGN,      {"%a", "5"}));
+        f->instructions.push_back(TestHelpers::createIRInstruction(ircpp::IRInstruction::OpCode::ASSIGN,      {"%b", "%a"}));
+        f->instructions.push_back(TestHelpers::createIRInstruction(ircpp::IRInstruction::OpCode::ASSIGN,      {"%i", "2"}));
+        f->instructions.push_back(TestHelpers::createIRInstruction(ircpp::IRInstruction::OpCode::ARRAY_STORE, {"%arr", "%i", "%b"}));
+        f->instructions.push_back(TestHelpers::createIRInstruction(ircpp::IRInstruction::OpCode::ARRAY_LOAD,  {"%c", "%arr", "%i"}));
+        f->instructions.push_back(TestHelpers::createIRInstruction(ircpp::IRInstruction::OpCode::RETURN,      {"%c"}));
+        p.functions.push_back(f);
+
+        auto mips = selector.selectProgram(p);
+        assert(!mips.empty());
+        auto asmTxt = selector.generateAssembly(mips);
+
+        // Expect at least one store and one load
+        assertLineRegex(asmTxt, R"(sw\s+\$\w+,\s*\d+\(\$\w+\))");
+        assertLineRegex(asmTxt, R"(lw\s+\$\w+,\s*\d+\(\$\w+\))");
+
+        // Return path present
+        assertLineRegex(asmTxt, R"(jr\s+\$\w+)");
+    }
+
+    std::cout << "All assertion-based instruction selector tests PASSED.\n";
+}
+
 
 // ============================================================================
 // TEST RUNNER FUNCTIONS
