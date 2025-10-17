@@ -1,101 +1,113 @@
+// register_manager.cpp
 #include "register_manager.hpp"
+#include <algorithm>
 
 namespace ircpp {
 
 RegisterManager::RegisterManager() {
-    // TODO: Initialize available physical registers
-    // Initialize availableRegs with MIPS physical registers
-    // Suggested order: $t0-$t9, $s0-$s7, $a0-$a3
-    // Reserve $v0, $v1, $sp, $fp, $ra for special purposes
-}
-
-std::shared_ptr<Register> RegisterManager::allocateRegister(const std::string& varName) {
-    // TODO: Implement register allocation
-    // Strategy:
-    // 1. Check if variable already has a register assigned
-    // 2. If available physical registers exist, allocate one
-    // 3. If no physical registers available, spill a register to stack
-    // 4. Update varToReg mapping
-    // 5. Return allocated register
-    
-    return nullptr; // Placeholder
-}
-
-void RegisterManager::deallocateRegister(const std::string& varName) {
-    // TODO: Implement register deallocation
-    // 1. Find register assigned to variable in varToReg
-    // 2. Move register back to availableRegs
-    // 3. Remove from varToReg mapping
-    // 4. Update usedRegs list
-}
-
-std::shared_ptr<Register> RegisterManager::getRegister(const std::string& varName) {
-    // TODO: Implement register lookup
-    // 1. Check varToReg mapping first
-    // 2. If not found, call allocateRegister
-    // 3. Return the register
-    
-    return nullptr; // Placeholder
-}
-
-std::shared_ptr<Register> RegisterManager::handleImmediate(int value) {
-    // TODO: Implement immediate handling
-    // For small immediate values, use LI instruction
-    // For large values, may need multiple instructions
-    // Strategy:
-    // 1. Allocate temporary register
-    // 2. Use LI instruction for immediate loading
-    // 3. Return temporary register
-    
-    return nullptr; // Placeholder
-}
-
-std::shared_ptr<Address> RegisterManager::spillRegister(std::shared_ptr<Register> reg) {
-    // TODO: Implement register spilling
-    // 1. Allocate stack space
-    // 2. Generate SW instruction to save register to stack
-    // 3. Return stack address for later restoration
-    
-    return nullptr; // Placeholder
-}
-
-int RegisterManager::allocateStackSpace(int size) {
-    // TODO: Implement stack space allocation
-    // 1. Update stackOffset by size
-    // 2. Return offset for stack allocation
-    // 3. Handle alignment (MIPS requires 4-byte alignment)
-    
-    return stackOffset; // Placeholder
-}
-
-std::vector<std::shared_ptr<Register>> RegisterManager::getCallerSavedRegs() {
-    // TODO: Return caller-saved registers
-    // MIPS caller-saved: $t0-$t9, $a0-$a3, $v0-$v1
-    return {};
-}
-
-std::vector<std::shared_ptr<Register>> RegisterManager::getCalleeSavedRegs() {
-    // TODO: Return callee-saved registers
-    // MIPS callee-saved: $s0-$s7, $fp, $ra
-    return {};
-}
-
-void RegisterManager::reset() {
-    // TODO: Reset manager state
-    // 1. Clear varToReg mapping
-    // 2. Move all used registers back to available
-    // 3. Reset virtual register counter
-    // 4. Reset stack offset
+    // Fill pool with physicals (caller/callee saved as you prefer to use)
+    // Prefer $t0-$t9 first for short-lived temps, then $s0-$s7.
+    availableRegs.reserve(18);
+    availableRegs.push_back(Registers::t0()); availableRegs.push_back(Registers::t1());
+    availableRegs.push_back(Registers::t2()); availableRegs.push_back(Registers::t3());
+    availableRegs.push_back(Registers::t4()); availableRegs.push_back(Registers::t5());
+    availableRegs.push_back(Registers::t6()); availableRegs.push_back(Registers::t7());
+    availableRegs.push_back(Registers::t8()); availableRegs.push_back(Registers::t9());
+    availableRegs.push_back(Registers::s0()); availableRegs.push_back(Registers::s1());
+    availableRegs.push_back(Registers::s2()); availableRegs.push_back(Registers::s3());
+    availableRegs.push_back(Registers::s4()); availableRegs.push_back(Registers::s5());
+    availableRegs.push_back(Registers::s6()); availableRegs.push_back(Registers::s7());
+    virtualRegCounter = 0;
+    stackOffset = 0;
 }
 
 std::shared_ptr<Register> RegisterManager::getVirtualRegister() {
-    // TODO: Create virtual register
-    // 1. Generate unique virtual register name
-    // 2. Create register with isPhysical = false
-    // 3. Increment virtual register counter
-    // 4. Return virtual register
-    
-    return nullptr; // Placeholder
+    auto name = "vi" + std::to_string(virtualRegCounter++);
+    return std::make_shared<Register>(Register{name, /*isPhysical=*/false});
+}
+
+std::shared_ptr<Register> RegisterManager::allocateRegister(const std::string& varName) {
+    // Reuse existing mapping
+    if (auto it = varToReg.find(varName); it != varToReg.end()) return it->second;
+
+    std::shared_ptr<Register> reg;
+    if (!availableRegs.empty()) {
+        reg = availableRegs.back();
+        availableRegs.pop_back();
+        usedRegs.push_back(reg);
+    } else {
+        // No physicals left → use a virtual (caller will spill/load as needed)
+        reg = getVirtualRegister();
+        usedRegs.push_back(reg);
+    }
+    varToReg[varName] = reg;
+    return reg;
+}
+
+void RegisterManager::deallocateRegister(const std::string& varName) {
+    auto it = varToReg.find(varName);
+    if (it == varToReg.end()) return;
+    auto reg = it->second;
+
+    // Return physicals to pool; virtuals just drop
+    if (reg->isPhysical) {
+        // erase from usedRegs
+        auto it2 = std::find_if(usedRegs.begin(), usedRegs.end(),
+                                [&](const std::shared_ptr<Register>& r){return r->name==reg->name;});
+        if (it2 != usedRegs.end()) usedRegs.erase(it2);
+        availableRegs.push_back(reg);
+    }
+    varToReg.erase(it);
+}
+
+std::shared_ptr<Register> RegisterManager::getRegister(const std::string& varName) {
+    if (auto it = varToReg.find(varName); it != varToReg.end()) return it->second;
+    return allocateRegister(varName);
+}
+
+// Allocator-only policy: just returns a temp reg; caller should emit `li $tmp, value`.
+std::shared_ptr<Register> RegisterManager::handleImmediate(int /*value*/) {
+    return getVirtualRegister();
+}
+
+// Allocates 4B by default, grows negative frame offsets relative to $fp.
+// Returns the (negative) byte offset.
+int RegisterManager::allocateStackSpace(int size) {
+    // 8-byte align
+    int aligned = (size + 7) & ~7;
+    stackOffset += aligned;
+    return -stackOffset; // e.g., -16 means -16($fp)
+}
+
+// Allocator-only policy: computes/returns spill address for reg; caller emits `sw/lw`.
+std::shared_ptr<Address> RegisterManager::spillRegister(std::shared_ptr<Register> reg) {
+    (void)reg; // the policy here doesn’t choose which reg to spill; caller decides.
+    int off = allocateStackSpace(4);
+    return std::make_shared<Address>(off, Registers::fp());
+}
+
+std::vector<std::shared_ptr<Register>> RegisterManager::getCallerSavedRegs() {
+    return {
+        Registers::t0(),Registers::t1(),Registers::t2(),Registers::t3(),Registers::t4(),
+        Registers::t5(),Registers::t6(),Registers::t7(),Registers::t8(),Registers::t9(),
+        Registers::a0(),Registers::a1(),Registers::a2(),Registers::a3(),
+        Registers::v0(),Registers::v1()
+    };
+}
+
+std::vector<std::shared_ptr<Register>> RegisterManager::getCalleeSavedRegs() {
+    return {
+        Registers::s0(),Registers::s1(),Registers::s2(),Registers::s3(),
+        Registers::s4(),Registers::s5(),Registers::s6(),Registers::s7(),
+        Registers::fp(),Registers::ra()
+    };
+}
+
+void RegisterManager::reset() {
+    availableRegs.clear(); usedRegs.clear(); varToReg.clear();
+    virtualRegCounter = 0; stackOffset = 0;
+    // Re-init pool
+    *this = RegisterManager();
 }
 
 } // namespace ircpp
