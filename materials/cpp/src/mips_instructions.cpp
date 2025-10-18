@@ -47,6 +47,7 @@ std::string opToString(MIPSOp op) {
         case MIPSOp::C_GE_S: return "c.ge.s";
         case MIPSOp::BC1T: return "bc1t";
         case MIPSOp::BC1F: return "bc1f";
+        case MIPSOp::MFLO: return "mflo";
         default: return "unknown";
     }
 }

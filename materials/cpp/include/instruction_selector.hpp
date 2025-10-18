@@ -1,8 +1,6 @@
 #pragma once
 
-#include <vector>
-#include <memory>
-#include <unordered_map>
+#include <bits/stdc++.h>
 #include "ir.hpp"
 #include "mips_instructions.hpp"
 #include "register_manager.hpp"

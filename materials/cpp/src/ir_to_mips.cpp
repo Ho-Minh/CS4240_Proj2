@@ -49,10 +49,12 @@ namespace TestHelpers {
     }
     
     // Create a selection context for testing
+    // In TestHelpers
     std::unique_ptr<ircpp::SelectionContext> createTestContext() {
-        auto regManager = std::make_unique<ircpp::RegisterManager>();
-        return std::make_unique<ircpp::SelectionContext>(*regManager);
+        static std::unique_ptr<ircpp::RegisterManager> rm{new ircpp::RegisterManager()};
+        return std::make_unique<ircpp::SelectionContext>(*rm);
     }
+
     
     // Print MIPS instructions for verification
     void printMIPSInstructions(const std::vector<ircpp::MIPSInstruction>& instructions, 

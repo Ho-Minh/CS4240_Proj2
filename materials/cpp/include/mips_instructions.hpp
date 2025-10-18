@@ -18,7 +18,7 @@ enum class MIPSOp {
     ADD, ADDI, SUB, MUL, DIV, AND, ANDI, OR, ORI, SLL,
     
     // Data movement
-    LI, LW, MOVE, SW, LA,
+    LI, LW, MOVE, SW, LA, MFLO,
     
     // Control flow
     BEQ, BNE, BLT, BGT, BGE, J, JAL, JR,

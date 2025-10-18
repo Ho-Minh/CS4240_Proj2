@@ -191,6 +191,29 @@ IRToMIPSSelector::selectFunction(const IRFunction& function) {
     return out;
 }
 
+std::shared_ptr<Register>
+InstructionSelector::getRegisterForOperand(std::shared_ptr<IROperand> irOp,
+                                           SelectionContext& ctx) {
+    if (!irOp) {
+        // Fallback: give a scratch virtual
+        return ctx.regManager.getVirtualRegister();
+    }
+
+    if (auto v = std::dynamic_pointer_cast<IRVariableOperand>(irOp)) {
+        // Map IR variable name -> (possibly physical) register
+        return ctx.regManager.getRegister(v->getName());
+    }
+
+    if (std::dynamic_pointer_cast<IRConstantOperand>(irOp)) {
+        // For immediates we return a temp register; the *selector* should emit LI/ADDI
+        // (handleImmediate returns a virtual scratch by policy)
+        return ctx.regManager.handleImmediate(/*value_unused_here*/0);
+    }
+
+    // Labels/functions don’t have a GP register; return a scratch if someone calls us anyway.
+    return ctx.regManager.getVirtualRegister();
+}
+
 std::vector<MIPSInstruction>
 IRToMIPSSelector::selectInstruction(const IRInstruction& instruction, SelectionContext& ctx) {
     // Use dedicated sub-selectors to keep this dispatcher lean
