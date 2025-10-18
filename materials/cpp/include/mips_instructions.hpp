@@ -97,6 +97,8 @@ struct MIPSInstruction {
                    std::vector<std::shared_ptr<MIPSOperand>> ops = {})
         : op(operation), label(lbl), operands(std::move(ops)) {}
     
+    MIPSInstruction() {}
+    
     std::string toString() const;
 };
 

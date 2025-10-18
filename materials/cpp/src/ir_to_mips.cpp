@@ -439,10 +439,6 @@ void testCallSelector() {
 // MAIN INSTRUCTION SELECTOR TESTS
 // ============================================================================
 
-#include <cassert>
-#include <regex>
-#include <string>
-
 // ---------- helpers ----------
 static void assertHas(const std::string& hay, const std::string& needle) {
     if (hay.find(needle) == std::string::npos) {
