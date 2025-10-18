@@ -26,7 +26,7 @@ std::string SelectionContext::generateLabel(const std::string& irLabel) {
     //    Example: fib.L3 or L3 as a fallback
     std::ostringstream oss;
     if (!currentFunction.empty()) {
-        oss << currentFunction << ".L" << labelCounter++;
+        oss << currentFunction << "_L" << labelCounter++;
     } else {
         oss << "L" << labelCounter++;
     }
