@@ -21,6 +21,8 @@ LIB_SRC := \
   $(SRCDIR)/ir_reader.cpp \
   $(SRCDIR)/mips_instructions.cpp \
   $(SRCDIR)/register_manager.cpp \
+  $(SRCDIR)/frame_builder.cpp \
+  $(SRCDIR)/emit_helpers.cpp \
   $(SRCDIR)/instruction_selector.cpp \
 
 # Executable sources
