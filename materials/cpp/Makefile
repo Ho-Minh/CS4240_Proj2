@@ -23,6 +23,8 @@ LIB_SRC := \
   $(SRCDIR)/register_manager.cpp \
   $(SRCDIR)/frame_builder.cpp \
   $(SRCDIR)/emit_helpers.cpp \
+  $(SRCDIR)/alloc_naive.cpp \
+  $(SRCDIR)/alloc_greedy.cpp \
   $(SRCDIR)/instruction_selector.cpp \
 
 # Executable sources
