@@ -1,0 +1,15 @@
+#start_function
+void main():
+int-list: t0, t1, t2, t3
+float-list:
+    callr, t0, geti
+    callr, t1, geti
+    assign, t2, 0
+    assign, t3, 0
+    or, t2, t0, t1
+    and, t2, t0, t1
+    and, t3, t0, t1
+    or, t3, t0, t1
+    call, puti, t2
+    call, puti, t3
+#end_function

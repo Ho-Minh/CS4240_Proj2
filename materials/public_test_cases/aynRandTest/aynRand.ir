@@ -1,0 +1,13 @@
+#start_function
+void main():
+int-list: a, b
+float-list:
+    add, a, 1, -1
+    assign, b, 100
+start_loop:
+    brgeq, exit_loop, a, b
+    add, a, a, 1
+    goto, start_loop
+exit_loop:
+    call, puti, a
+#end_function

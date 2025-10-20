@@ -1,0 +1,50 @@
+#start_function
+void main():
+int-list: v0, v1, v2, v3, v4, v5, throw_away
+float-list:
+    assign, v0, 123
+    assign, v1, 456
+    assign, v2, 789
+    assign, v3, -123
+    assign, v4, -456
+    assign, v5, -789
+
+    callr, throw_away, foo, v0, v1, v2, v3, v4, v5
+#end_function
+
+#start_function
+int foo(int a, int b, int c, int d, int e, int f):
+int-list: throw_away
+float-list:
+    callr, throw_away, bar, a, b, c, d, e, f
+
+    call, puti, a
+    call, puti, b
+    call, puti, c
+    call, puti, d
+    call, puti, e
+    call, puti, f
+
+    return 4240
+#end_function
+
+#start_function
+int bar(int a, int b, int c, int d, int e, int f):
+int-list:
+float-list:
+    mult, a, a, -2
+    mult, b, b, -2
+    mult, c, c, -2
+    mult, d, d, 2
+    mult, e, e, 2
+    mult, f, f, 2
+
+    call, puti, a
+    call, puti, b
+    call, puti, c
+    call, puti, d
+    call, puti, e
+    call, puti, f
+
+    return 4240
+#end_function

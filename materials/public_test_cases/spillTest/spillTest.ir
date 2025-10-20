@@ -1,0 +1,58 @@
+#start_function
+void main():
+int-list: v0, v1, v2, v3, v4, v5, v6, v7, v8, v9, v10, v11, v12
+float-list:
+    assign, v0, 0
+    assign, v1, 1
+    assign, v2, 2
+    assign, v3, 3
+    add v3, v3, v3
+
+    assign, v4, 4
+    assign, v5, 5
+    assign, v6, 6
+    assign, v7, 7
+    assign, v8, 8
+    assign, v9, 9
+    assign, v10, 10
+    assign, v11, 11
+    assign, v12, 12
+
+    add v4, v4, v4
+    add v5, v5, v5
+    add v6, v6, v6
+    add v7, v7, v7
+    add v8, v8, v8
+    add v9, v9, v9
+    add v10, v10, v10
+    add v11, v11, v11
+    add v12, v12, v12
+
+    add v0, v1, v2
+
+    call, puti, v0
+    call, putc, 10
+    call, puti, v1
+    call, putc, 10
+    call, puti, v2
+    call, putc, 10
+    call, puti, v3
+    call, putc, 10
+    call, puti, v4
+    call, putc, 10
+    call, puti, v5
+    call, putc, 10
+    call, puti, v6
+    call, putc, 10
+    call, puti, v7
+    call, putc, 10
+    call, puti, v8
+    call, putc, 10
+    call, puti, v9
+    call, putc, 10
+    call, puti, v10
+    call, putc, 10
+    call, puti, v11
+    call, putc, 10
+    call, puti, v12
+#end_function

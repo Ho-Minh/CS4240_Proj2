@@ -1,0 +1,23 @@
+#start_function
+void main():
+int-list: input, result
+float-list:
+    callr, input, geti
+    callr, result, factorial, input
+    call, puti, result
+#end_function
+
+#start_function
+int factorial(int n):
+int-list: factorial_nminus, product, nminus
+float-list:
+    brgt, recursive_step, n, 1
+base_case:
+    return, 1
+recursive_step:
+    sub, nminus, n, 1
+    callr, factorial_nminus, factorial, nminus
+    mult, product, n, factorial_nminus
+
+    return, product 
+#end_function

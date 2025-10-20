@@ -1,0 +1,32 @@
+#start_function
+void main():
+int-list: res, a, b
+float-list:
+    callr, a, geti
+    callr, b, geti
+
+    add, res, a, b
+    call, puti, res
+    call, putc, 10
+
+    sub, res, a, b
+    call, puti, res
+    call, putc, 10
+
+    mult, res, a, b
+    call, puti, res
+    call, putc, 10
+
+    div, res, a, b
+    call, puti, res
+    call, putc, 10
+
+    and, res, a, b
+    call, puti, res
+    call, putc, 10
+
+    or, res, a, b
+    call, puti, res
+    call, putc, 10
+
+#end_function

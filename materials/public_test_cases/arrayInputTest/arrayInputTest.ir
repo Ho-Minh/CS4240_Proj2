@@ -1,0 +1,34 @@
+#start_function
+void main():
+int-list: i, A[10], input, output
+float-list:
+    assign, i, 0
+loop_start:
+    brgt, end, i, 9
+    callr, input, geti
+    array_store, input, A, i
+    add i, 1, i
+    goto, loop_start
+end:
+    callr, output, sum, A
+    call, puti, output
+    call, putc, 10
+
+#end_function
+
+#start_function
+int sum(int[10] Arr):
+int-list: sum, i, temp
+float-list:
+    assign, sum, 0
+    assign, i, 0
+loop_start:
+    brgt, end, i, 9
+    array_load, temp, Arr, i
+    add, sum, sum, temp
+    add, i, i, 1
+    goto, loop_start
+end:
+    return, sum
+
+#end_function

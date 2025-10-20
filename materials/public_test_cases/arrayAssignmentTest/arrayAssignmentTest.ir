@@ -1,0 +1,12 @@
+#start_function
+void main():
+int-list: t0, X[100]
+float-list:
+    callr, t0, geti
+    assign, X, 100, t0
+    add, t0, t0, 1
+    assign, X, 100, t0
+    array_load, t0, X, 0
+    call, puti, t0
+    call, putc, 10
+#end_function

@@ -1,0 +1,17 @@
+#start_function
+void empty():
+int-list:
+float-list:
+#end_function
+
+#start_function
+void main():
+int-list:
+float-list:
+    label0:
+    label1:
+    label2:
+    label3:
+    label4:
+    label5:
+#end_function

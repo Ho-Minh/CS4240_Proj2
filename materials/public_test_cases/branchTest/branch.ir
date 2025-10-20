@@ -1,0 +1,56 @@
+#start_function
+void main():
+int-list: a, b
+float-list:
+    callr, a, geti
+    callr, b, geti
+
+breq:
+    breq, took_breq, a, b
+    breq, took_breq, a, b
+    goto, not_taken_breq
+took_breq:
+    call, putc, 84
+    goto, brneq_case
+not_taken_breq:
+    call, putc, 78
+
+brneq_case:
+    brneq, took_brneq, a, b
+    goto, not_taken_brneq
+took_brneq:
+    call, putc, 84
+    goto, brlt_case
+not_taken_brneq:
+    call, putc, 78
+
+brlt_case:
+    brlt, took_brlt, a, b
+    goto, not_taken_brlt
+took_brlt:
+    call, putc, 84
+    goto, brgt_case
+not_taken_brlt:
+    call, putc, 78
+
+brgt_case:
+    brgt, took_brgt, a, b
+    goto, not_taken_brgt
+took_brgt:
+    call, putc, 84
+    goto, brgeq_case
+not_taken_brgt:
+    call, putc, 78
+
+brgeq_case:
+    brgeq, took_brgeq, a, b
+    goto, not_taken_brgeq
+took_brgeq:
+    call, putc, 84
+    goto, end
+not_taken_brgeq:
+    call, putc, 78
+
+end:
+
+#end_function

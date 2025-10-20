@@ -1,0 +1,23 @@
+#start_function
+void main():
+int-list: arr[3], t1, i
+float-list:
+    assign, i, 0
+    array_store, -1, arr, 0
+init_loop:
+    brgeq, after_first_loop, i, 2
+    array_store, 4240, arr, i
+    add, i, i, 1
+    goto, init_loop
+after_first_loop:
+    array_store, 1331, arr, i
+    assign, i, 0
+print_loop:
+    brgeq, end, i, 3
+    array_load, t1, arr, i
+    call, puti, t1
+    call, putc, 10
+    add, i, i, 1
+    goto, print_loop
+end:
+#end_function

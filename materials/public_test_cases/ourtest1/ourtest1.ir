@@ -1,0 +1,21 @@
+#start_function
+void main():
+int-list: t0, t1, t2, t3
+float-list:
+    callr, t0, geti
+    assign, t1, 0
+    assign, t2, 0
+    assign, t3, 0
+    call, puti, t1
+lstart:
+    brgeq, lexit, 1, t2
+    callr, t2, geti
+    mult, t0, t0, 5
+    goto, lstart
+lexit:
+    call, puti, t2
+    assign, t3, 0
+    brgeq, else1, 0, t0
+    assign, t3, 0
+else1:
+#end_function
