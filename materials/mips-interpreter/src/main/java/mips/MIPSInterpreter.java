@@ -473,6 +473,21 @@ public class MIPSInterpreter {
                             System.out.println();
                         }
                         break;
+                    case 12: // READ_CHAR (non-SPIM standard in this interpreter)
+                        try {
+                            int ch;
+                            if (inputReader != null) {
+                                ch = inputReader.read();
+                            } else {
+                                String line = input.nextLine();
+                                ch = line.length() > 0 ? (int)line.charAt(0) : -1;
+                            }
+                            if (ch < 0) ch = 0; // EOF -> 0
+                            writeRegister("$v0", ch);
+                        } catch (Exception e) {
+                            writeRegister("$v0", 0);
+                        }
+                        break;
                 }
 
                 pc += 4;

@@ -254,6 +254,23 @@ IRToMIPSSelector::selectProgram(const IRProgram& program) {
             }
         }
 
+        // Load stack-passed parameters (beyond 4) into their slots
+        if (F.parameters.size() > 4) {
+            for (size_t i = 4; i < F.parameters.size(); ++i) {
+                auto p = F.parameters[i]; if (!p) continue;
+                int varOff = fi.varOffset[p->getName()];
+                // Extra args are located immediately above the callee frame
+                int extraOff = fi.frameBytes + int((i - 4) * 4);
+                auto t = Registers::t0();
+                out.emplace_back(MIPSOp::LW, "", std::vector<std::shared_ptr<MIPSOperand>>{
+                    t, std::make_shared<Address>(extraOff, Registers::fp())
+                });
+                out.emplace_back(MIPSOp::SW, "", std::vector<std::shared_ptr<MIPSOperand>>{
+                    t, std::make_shared<Address>(varOff, Registers::fp())
+                });
+            }
+        }
+
         // Emit body
         SelectionContext ctx{ regManager };
         ctx.currentFunction = F.name;
@@ -290,6 +307,26 @@ IRToMIPSSelector::selectProgram(const IRProgram& program) {
             });
         };
 
+        // Float helpers: store single from $fX and load single into $fX
+        auto storeVarF32 = [&](const std::string& name, const std::shared_ptr<Register>& fSrc,
+                               std::vector<MIPSInstruction>& code){
+            int off = fi.varOffset[name];
+            code.emplace_back(MIPSOp::S_S, "", std::vector<std::shared_ptr<MIPSOperand>>{
+                fSrc, std::make_shared<Address>(off, Registers::fp())
+            });
+        };
+        auto loadVarF32 = [&](const std::shared_ptr<IROperand>& op, const std::shared_ptr<Register>& fDst,
+                              std::vector<MIPSInstruction>& code){
+            if (auto v = std::dynamic_pointer_cast<IRVariableOperand>(op)) {
+                int off = fi.varOffset[v->getName()];
+                code.emplace_back(MIPSOp::L_S, "", std::vector<std::shared_ptr<MIPSOperand>>{
+                    fDst, std::make_shared<Address>(off, Registers::fp())
+                });
+            } else {
+                // Float immediates not supported here
+            }
+        };
+
         for (const auto& ir : F.instructions) {
             if (!ir) continue;
             std::vector<MIPSInstruction> code;
@@ -304,10 +341,56 @@ IRToMIPSSelector::selectProgram(const IRProgram& program) {
                 }
                 case IRInstruction::OpCode::ASSIGN: {
                     auto dst = std::dynamic_pointer_cast<IRVariableOperand>(ir->operands[0]);
-                    auto src = ir->operands[1];
-                    auto t0 = Registers::t0();
-                    loadOp(src, t0, code);
-                    storeVar(dst->getName(), t0, code);
+                    if (!dst) break;
+                    // Handle bulk array set: ASSIGN array, count, value
+                    if (ir->operands.size() == 3 && std::dynamic_pointer_cast<IRArrayType>(dst->type)) {
+                        // tCnt=t0, tVal=t1, tIdx=t2, tAddr=t3, baseReg=t4
+                        auto tCnt  = Registers::t0();
+                        auto tVal  = Registers::t1();
+                        auto tIdx  = Registers::t2();
+                        auto tAddr = Registers::t3();
+                        auto baseR = Registers::t4();
+
+                        // Load count and value
+                        loadOp(ir->operands[1], tCnt, code);
+                        loadOp(ir->operands[2], tVal, code);
+                        // idx = 0
+                        code.emplace_back(MIPSOp::LI, "", std::vector<std::shared_ptr<MIPSOperand>>{ tIdx, std::make_shared<Immediate>(0) });
+
+                        // Compute baseReg for array
+                        int baseOff = fi.varOffset[dst->getName()];
+                        if (fi.paramArrayNames.count(dst->getName())) {
+                            code.emplace_back(MIPSOp::LW, "", std::vector<std::shared_ptr<MIPSOperand>>{ baseR, std::make_shared<Address>(baseOff, Registers::fp()) });
+                        } else {
+                            code.emplace_back(MIPSOp::ADDI, "", std::vector<std::shared_ptr<MIPSOperand>>{ baseR, Registers::fp(), std::make_shared<Immediate>(baseOff) });
+                        }
+
+                        static int arrSetCounter = 0;
+                        std::string Lloop = F.name + std::string("_arrset_") + std::to_string(arrSetCounter++);
+                        std::string Lend  = F.name + std::string("_arrset_end_") + std::to_string(arrSetCounter++);
+
+                        // loop label
+                        code.emplace_back(MIPSOp::SLL, Lloop, std::vector<std::shared_ptr<MIPSOperand>>{ Registers::zero(), Registers::zero(), std::make_shared<Immediate>(0) });
+                        // if (idx >= cnt) goto end
+                        code.emplace_back(MIPSOp::BGE, "", std::vector<std::shared_ptr<MIPSOperand>>{ tIdx, tCnt, std::make_shared<Label>(Lend) });
+                        // addr = base + (idx<<2)
+                        code.emplace_back(MIPSOp::SLL, "", std::vector<std::shared_ptr<MIPSOperand>>{ tAddr, tIdx, std::make_shared<Immediate>(2) });
+                        code.emplace_back(MIPSOp::ADD, "", std::vector<std::shared_ptr<MIPSOperand>>{ tAddr, baseR, tAddr });
+                        // *(addr) = value
+                        code.emplace_back(MIPSOp::SW,  "", std::vector<std::shared_ptr<MIPSOperand>>{ tVal, std::make_shared<Address>(0, tAddr) });
+                        // idx++
+                        code.emplace_back(MIPSOp::ADDI, "", std::vector<std::shared_ptr<MIPSOperand>>{ tIdx, tIdx, std::make_shared<Immediate>(1) });
+                        // goto loop
+                        code.emplace_back(MIPSOp::J, "", std::vector<std::shared_ptr<MIPSOperand>>{ std::make_shared<Label>(Lloop) });
+                        // end label
+                        code.emplace_back(MIPSOp::SLL, Lend, std::vector<std::shared_ptr<MIPSOperand>>{ Registers::zero(), Registers::zero(), std::make_shared<Immediate>(0) });
+                    } else {
+                        // Simple scalar assign: ASSIGN dest, src
+                        auto src = ir->operands[1];
+                        auto t0 = Registers::t0();
+                        loadOp(src, t0, code);
+                        storeVar(dst->getName(), t0, code);
+                    }
                     break;
                 }
                 case IRInstruction::OpCode::ADD:
@@ -376,6 +459,18 @@ IRToMIPSSelector::selectProgram(const IRProgram& program) {
                         }
                         break;
                     }
+                    if (callee == "getc") {
+                        // Read a character into $v0 using interpreter's char handler (v0=12)
+                        out.emplace_back(MIPSOp::LI, "", std::vector<std::shared_ptr<MIPSOperand>>{
+                            Registers::v0(), std::make_shared<Immediate>(12)
+                        });
+                        out.emplace_back(MIPSOp::SYSCALL, "", std::vector<std::shared_ptr<MIPSOperand>>{});
+                        if (ir->opCode == IRInstruction::OpCode::CALLR) {
+                            auto dst = std::dynamic_pointer_cast<IRVariableOperand>(ir->operands[0]);
+                            storeVar(dst->getName(), Registers::v0(), code);
+                        }
+                        break;
+                    }
                     if (callee == "puti" || callee == "putc") {
                         // load arg0
                         auto t0 = Registers::t0();
@@ -386,7 +481,30 @@ IRToMIPSSelector::selectProgram(const IRProgram& program) {
                         code.emplace_back(MIPSOp::SYSCALL, "", std::vector<std::shared_ptr<MIPSOperand>>{});
                         break;
                     }
-                    // normal call: pass up to 4 args
+                    if (callee == "putf") {
+                        // load float arg into $f12 and syscall 2
+                        auto f12 = std::make_shared<Register>(Register{"f12", true});
+                        if (idx < ir->operands.size()) loadVarF32(ir->operands[idx], f12, code);
+                        out.emplace_back(MIPSOp::LI, "", std::vector<std::shared_ptr<MIPSOperand>>{
+                            Registers::v0(), std::make_shared<Immediate>(2)
+                        });
+                        out.emplace_back(MIPSOp::SYSCALL, "", std::vector<std::shared_ptr<MIPSOperand>>{});
+                        break;
+                    }
+                    if (callee == "getf") {
+                        // Read float into $f0 (syscall 6)
+                        out.emplace_back(MIPSOp::LI, "", std::vector<std::shared_ptr<MIPSOperand>>{
+                            Registers::v0(), std::make_shared<Immediate>(6)
+                        });
+                        out.emplace_back(MIPSOp::SYSCALL, "", std::vector<std::shared_ptr<MIPSOperand>>{});
+                        if (ir->opCode == IRInstruction::OpCode::CALLR) {
+                            auto dst = std::dynamic_pointer_cast<IRVariableOperand>(ir->operands[0]);
+                            auto f0 = std::make_shared<Register>(Register{"f0", true});
+                            storeVarF32(dst->getName(), f0, code);
+                        }
+                        break;
+                    }
+                    // normal call: pass up to 4 args, push extras on stack
                     static std::shared_ptr<Register> aRegs[4] = { Registers::a0(), Registers::a1(), Registers::a2(), Registers::a3() };
                     for (size_t a = 0; a < 4 && idx + a < ir->operands.size(); ++a) {
                         auto arg = ir->operands[idx + a];
@@ -411,9 +529,35 @@ IRToMIPSSelector::selectProgram(const IRProgram& program) {
                         loadOp(arg, t, code);
                         code.emplace_back(MIPSOp::MOVE, "", std::vector<std::shared_ptr<MIPSOperand>>{ aRegs[a], t });
                     }
+                    // Push extra args (right-to-left) so arg[4] is closest to callee frame
+                    if (idx + 4 < ir->operands.size()) {
+                        size_t extraStart = idx + 4; // first extra arg index
+                        // collect extras in order, then push in reverse
+                        std::vector<std::shared_ptr<IROperand>> extras;
+                        for (size_t a = extraStart; a < ir->operands.size(); ++a) {
+                            extras.push_back(ir->operands[a]);
+                        }
+                        for (size_t r = extras.size(); r-- > 0; ) {
+                            auto t = Registers::t0();
+                            loadOp(extras[r], t, code);
+                            code.emplace_back(MIPSOp::ADDI, "", std::vector<std::shared_ptr<MIPSOperand>>{
+                                Registers::sp(), Registers::sp(), std::make_shared<Immediate>(-4)
+                            });
+                            code.emplace_back(MIPSOp::SW, "", std::vector<std::shared_ptr<MIPSOperand>>{
+                                t, std::make_shared<Address>(0, Registers::sp())
+                            });
+                        }
+                    }
                     code.emplace_back(MIPSOp::JAL, "", std::vector<std::shared_ptr<MIPSOperand>>{
                         std::make_shared<Label>(callee)
                     });
+                    // Pop extra args after call
+                    if (idx + 4 < ir->operands.size()) {
+                        int extra = int(ir->operands.size() - (idx + 4));
+                        code.emplace_back(MIPSOp::ADDI, "", std::vector<std::shared_ptr<MIPSOperand>>{
+                            Registers::sp(), Registers::sp(), std::make_shared<Immediate>(extra * 4)
+                        });
+                    }
                     if (ir->opCode == IRInstruction::OpCode::CALLR) {
                         auto dst = std::dynamic_pointer_cast<IRVariableOperand>(ir->operands[0]);
                         storeVar(dst->getName(), Registers::v0(), code);
