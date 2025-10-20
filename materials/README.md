@@ -1,3 +1,15 @@
+Project 2 Backend (IR -> MIPS32)
+
+Build:
+  materials/cpp/build.sh
+
+Run:
+  materials/cpp/run.sh <input.ir> <output.s> [--naive|--greedy]
+
+Notes:
+- --naive: per-instruction load/compute/store using stack slots
+- --greedy: intra-block greedy allocator (loads mapped vars at block entry; stores at exit)
+
 # CS4240 Project 2: IR to MIPS32 Instruction Selector
 
 This project implements an instruction selector that converts Intermediate Representation (IR) code to MIPS32 assembly language.

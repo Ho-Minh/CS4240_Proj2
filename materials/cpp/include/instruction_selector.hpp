@@ -1,6 +1,9 @@
 #pragma once
 
-#include <bits/stdc++.h>
+#include <string>
+#include <vector>
+#include <memory>
+#include <unordered_map>
 #include "ir.hpp"
 #include "mips_instructions.hpp"
 #include "register_manager.hpp"
@@ -79,9 +82,16 @@ class IRToMIPSSelector {
 private:
     SelectorRegistry registry;
     RegisterManager regManager;
+public:
+    enum class AllocMode { Naive, Greedy };
+private:
+    AllocMode mode;
     
 public:
     IRToMIPSSelector();
+    explicit IRToMIPSSelector(AllocMode m);
+    void setAllocMode(AllocMode m) { mode = m; }
+    AllocMode getAllocMode() const { return mode; }
     
     // TODO: Implement program selection
     // Convert entire IR program to MIPS assembly
