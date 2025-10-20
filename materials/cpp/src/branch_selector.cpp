@@ -133,9 +133,13 @@ std::vector<MIPSInstruction> BranchSelector::selectLabel(const IRInstruction& ir
     }
     if (!lbl) return {};
 
-    // Emit a label-bearing no-op-ish instruction. Your toString() prints an opcode even if only label is set;
-    // tests don’t assert on opcode for LABEL, so any valid op is fine here.
-    MIPSInstruction tagged{ MIPSOp::ADDI, ctx.generateLabel(lbl->getName()), {} };
+    // Emit a label with a proper no-op: sll $zero, $zero, 0
+    // This ensures the line is a valid instruction for the interpreter.
+    MIPSInstruction tagged{
+        MIPSOp::SLL,
+        ctx.generateLabel(lbl->getName()),
+        { Registers::zero(), Registers::zero(), std::make_shared<Immediate>(0) }
+    };
     return { tagged };
 }
 

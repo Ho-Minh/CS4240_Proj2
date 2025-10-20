@@ -56,6 +56,9 @@ public:
     // Save/restore registers around function calls
     std::vector<std::shared_ptr<Register>> getCallerSavedRegs();
     std::vector<std::shared_ptr<Register>> getCalleeSavedRegs();
+
+    // Return currently allocated caller-saved physical registers ($t0-$t9, $a0-$a3, $v0-$v1)
+    std::vector<std::shared_ptr<Register>> getAllocatedCallerSavedRegs() const;
     
     // TODO: Implement cleanup
     // Reset manager state for new function

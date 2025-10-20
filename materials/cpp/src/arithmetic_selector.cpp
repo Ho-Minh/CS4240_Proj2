@@ -82,21 +82,12 @@ vector<MIPSInstruction> ArithmeticSelector::selectMult(const IRInstruction& ir, 
 // --------------------------- DIV ---------------------------
 vector<MIPSInstruction> ArithmeticSelector::selectDiv(const IRInstruction& ir, SelectionContext& ctx) {
     // IR: DIV dest, src1, src2
-    // Use DIV (3-operand form) from your enum.
+    // Emit interpreter-supported 3-operand form: div $dest, $src1, $src2
     auto dest = this->getRegisterForOperand(ir.operands[0], ctx);
     auto src1 = this->getRegisterForOperand(ir.operands[1], ctx);
     auto src2 = this->getRegisterForOperand(ir.operands[2], ctx);
-
-    return {
-        MIPSInstruction{
-            MIPSOp::DIV, /*label*/"",
-            std::vector<std::shared_ptr<MIPSOperand>>{ src1, src2 }
-        },
-        MIPSInstruction {
-            MIPSOp::MFLO, "",
-            std::vector<std::shared_ptr<MIPSOperand>>{ dest }
-        }
-    };
+    return { MIPSInstruction{ MIPSOp::DIV, "",
+        std::vector<std::shared_ptr<MIPSOperand>>{ dest, src1, src2 } } };
 }
 
 // --------------------------- AND ---------------------------

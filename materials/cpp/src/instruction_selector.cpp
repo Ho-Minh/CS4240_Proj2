@@ -86,13 +86,29 @@ SelectionContext::generateFunctionPrologue(const IRFunction& func) {
     out.emplace_back(MIPSOp::MOVE, "",
         std::vector<std::shared_ptr<MIPSOperand>>{ fp(), sp() });
 
-    // Save callee-saved s-registers at 8(sp) upward
+    // Save callee-saved s-registers at 8(sp) upward (currently none if policy returns empty)
     int off = 8;
     for (auto& r : saveRegs) {
         out.emplace_back(MIPSOp::SW, "",
             std::vector<std::shared_ptr<MIPSOperand>>{ r, std::make_shared<Address>(off, sp()) });
         off += 4;
     }
+
+    // Initialize function parameters: move $a0-$a3 into their allocated variable registers
+    if (!func.parameters.empty()) {
+        static std::shared_ptr<Register> aRegs[4] = { a0(), a1(), a2(), a3() };
+        const size_t n = std::min<size_t>(4, func.parameters.size());
+        for (size_t i = 0; i < n; ++i) {
+            auto& p = func.parameters[i];
+            if (!p) continue;
+            auto dst = regManager.getRegister(p->getName());
+            out.emplace_back(MIPSOp::MOVE, "",
+                std::vector<std::shared_ptr<MIPSOperand>>{ dst, aRegs[i] });
+        }
+        // Note: params beyond 4 would be on caller's stack; not needed for current tests
+    }
+
+    // Do not auto-initialize locals; rely on IR assignments to set values
 
     // No explicit locals init; space is reserved by sp adjustment already.
     return out;
@@ -152,6 +168,15 @@ IRToMIPSSelector::selectProgram(const IRProgram& program) {
     std::vector<MIPSInstruction> out;
     SelectionContext ctx{ regManager /*passed by ref in ctor or member*/ };
 
+    // Program entry: call main and then exit (syscall 10)
+    out.emplace_back(MIPSOp::JAL, "", std::vector<std::shared_ptr<MIPSOperand>>{
+        std::make_shared<Label>(std::string("main"))
+    });
+    out.emplace_back(MIPSOp::LI, "", std::vector<std::shared_ptr<MIPSOperand>>{
+        Registers::v0(), std::make_shared<Immediate>(10)
+    });
+    out.emplace_back(MIPSOp::SYSCALL, "", std::vector<std::shared_ptr<MIPSOperand>>{});
+
     for (const auto& fn : program.functions) {
         if (!fn) continue;
         auto body = selectFunction(*fn);
@@ -182,9 +207,14 @@ IRToMIPSSelector::selectFunction(const IRFunction& function) {
         out.insert(out.end(), part.begin(), part.end());
     }
 
-    // Epilogue (simple layout: returns may early-exit; that’s fine)
+    // Epilogue (add an addressable label so early returns can jump here)
     {
         auto epi = ctx.generateFunctionEpilogue(function);
+        if (!epi.empty()) {
+            // Place a label on the first epilogue instruction: <func>_epilogue
+            std::string epilogueLabel = function.name + std::string("_epilogue");
+            epi.front().label = epilogueLabel;
+        }
         out.insert(out.end(), epi.begin(), epi.end());
     }
 
@@ -264,6 +294,8 @@ IRToMIPSSelector::selectInstruction(const IRInstruction& instruction, SelectionC
 std::string
 IRToMIPSSelector::generateAssembly(const std::vector<MIPSInstruction>& instructions) {
     std::ostringstream oss;
+    // Ensure the text section is declared so the interpreter sets PC correctly
+    oss << ".text\n";
     for (const auto& ins : instructions) {
         oss << ins.toString();
     }

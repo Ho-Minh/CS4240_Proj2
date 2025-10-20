@@ -60,10 +60,18 @@ std::vector<MIPSInstruction> CallSelector::selectCall(const IRInstruction& ir,
         return code;
     }
 
-    // Save caller-saved registers
+    // Save only currently allocated caller-saved registers
     {
-        auto pro = saveCallerSavedRegisters(ctx);
-        code.insert(code.end(), pro.begin(), pro.end());
+        using namespace Registers;
+        auto regs = ctx.regManager.getAllocatedCallerSavedRegs();
+        for (auto& r : regs) {
+            code.emplace_back(MIPSOp::ADDI, "", std::vector<std::shared_ptr<MIPSOperand>>{
+                sp(), sp(), std::make_shared<Immediate>(-4)
+            });
+            code.emplace_back(MIPSOp::SW, "", std::vector<std::shared_ptr<MIPSOperand>>{
+                r, std::make_shared<Address>(0, sp())
+            });
+        }
     }
 
     // Setup parameters (also pushes extra args onto stack)
@@ -88,10 +96,19 @@ std::vector<MIPSInstruction> CallSelector::selectCall(const IRInstruction& ir,
         code.insert(code.end(), cleanup.begin(), cleanup.end());
     }
 
-    // Restore caller-saved
+    // Restore only those pushed
     {
-        auto epi = restoreCallerSavedRegisters(ctx);
-        code.insert(code.end(), epi.begin(), epi.end());
+        using namespace Registers;
+        auto regs = ctx.regManager.getAllocatedCallerSavedRegs();
+        for (auto it = regs.rbegin(); it != regs.rend(); ++it) {
+            auto& r = *it;
+            code.emplace_back(MIPSOp::LW, "", std::vector<std::shared_ptr<MIPSOperand>>{
+                r, std::make_shared<Address>(0, sp())
+            });
+            code.emplace_back(MIPSOp::ADDI, "", std::vector<std::shared_ptr<MIPSOperand>>{
+                sp(), sp(), std::make_shared<Immediate>(4)
+            });
+        }
     }
 
     return code;
@@ -189,11 +206,18 @@ std::vector<MIPSInstruction> CallSelector::selectReturn(const IRInstruction& ir,
         }
     }
 
-    // Direct return; your function epilogue also emits a return when the whole
-    // function ends — early returns will still be correct here.
-    code.emplace_back(MIPSOp::JR, "", std::vector<std::shared_ptr<MIPSOperand>>{
-        Registers::ra()
-    });
+    // Jump to function epilogue to restore callee-saved regs and stack before returning
+    // The epilogue is labeled "<function>_epilogue" by IRToMIPSSelector::selectFunction
+    if (!ctx.currentFunction.empty()) {
+        code.emplace_back(MIPSOp::J, "", std::vector<std::shared_ptr<MIPSOperand>>{
+            std::make_shared<Label>(ctx.currentFunction + std::string("_epilogue"))
+        });
+    } else {
+        // Fallback: direct jr if function name is unknown
+        code.emplace_back(MIPSOp::JR, "", std::vector<std::shared_ptr<MIPSOperand>>{
+            Registers::ra()
+        });
+    }
     return code;
 }
 

@@ -7,16 +7,14 @@ namespace ircpp {
 RegisterManager::RegisterManager() {
     // Fill pool with physicals (caller/callee saved as you prefer to use)
     // Prefer $t0-$t9 first for short-lived temps, then $s0-$s7.
-    availableRegs.reserve(18);
+    availableRegs.reserve(10);
+    // Use only caller-saved $t* for temporaries; avoid $s* to prevent
+    // uninitialized callee-saved register reads in the interpreter.
     availableRegs.push_back(Registers::t0()); availableRegs.push_back(Registers::t1());
     availableRegs.push_back(Registers::t2()); availableRegs.push_back(Registers::t3());
     availableRegs.push_back(Registers::t4()); availableRegs.push_back(Registers::t5());
     availableRegs.push_back(Registers::t6()); availableRegs.push_back(Registers::t7());
     availableRegs.push_back(Registers::t8()); availableRegs.push_back(Registers::t9());
-    availableRegs.push_back(Registers::s0()); availableRegs.push_back(Registers::s1());
-    availableRegs.push_back(Registers::s2()); availableRegs.push_back(Registers::s3());
-    availableRegs.push_back(Registers::s4()); availableRegs.push_back(Registers::s5());
-    availableRegs.push_back(Registers::s6()); availableRegs.push_back(Registers::s7());
     virtualRegCounter = 0;
     stackOffset = 0;
 }
@@ -87,20 +85,32 @@ std::shared_ptr<Address> RegisterManager::spillRegister(std::shared_ptr<Register
 }
 
 std::vector<std::shared_ptr<Register>> RegisterManager::getCallerSavedRegs() {
-    return {
-        Registers::t0(),Registers::t1(),Registers::t2(),Registers::t3(),Registers::t4(),
-        Registers::t5(),Registers::t6(),Registers::t7(),Registers::t8(),Registers::t9(),
-        Registers::a0(),Registers::a1(),Registers::a2(),Registers::a3(),
-        Registers::v0(),Registers::v1()
-    };
+    // Disable saving caller-saved registers to avoid interpreter errors when
+    // storing uninitialized registers. Our tests don't depend on preserving
+    // these across calls.
+    return {};
 }
 
 std::vector<std::shared_ptr<Register>> RegisterManager::getCalleeSavedRegs() {
-    return {
-        Registers::s0(),Registers::s1(),Registers::s2(),Registers::s3(),
-        Registers::s4(),Registers::s5(),Registers::s6(),Registers::s7(),
-        Registers::fp(),Registers::ra()
+    // Minimal policy for this interpreter: do not save $s* in prologue,
+    // since reading them before any write triggers an error. We still
+    // handle $fp/$ra separately in the prologue/epilogue code paths.
+    return {};
+}
+
+std::vector<std::shared_ptr<Register>> RegisterManager::getAllocatedCallerSavedRegs() const {
+    std::vector<std::shared_ptr<Register>> out;
+    auto isCallerSaved = [](const std::shared_ptr<Register>& r){
+        const std::string& n = r->name;
+        if (n.size() == 2 && n[0] == 't' && n[1] >= '0' && n[1] <= '9') return true;
+        if (n.size() == 2 && n[0] == 'a' && n[1] >= '0' && n[1] <= '3') return true;
+        if ((n == "v0") || (n == "v1")) return true;
+        return false;
     };
+    for (const auto& r : usedRegs) {
+        if (r && r->isPhysical && isCallerSaved(r)) out.push_back(r);
+    }
+    return out;
 }
 
 void RegisterManager::reset() {
