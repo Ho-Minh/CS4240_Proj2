@@ -22,10 +22,6 @@ LIB_SRC := \
   $(SRCDIR)/mips_instructions.cpp \
   $(SRCDIR)/register_manager.cpp \
   $(SRCDIR)/instruction_selector.cpp \
-  $(SRCDIR)/arithmetic_selector.cpp \
-  $(SRCDIR)/branch_selector.cpp \
-  $(SRCDIR)/memory_selector.cpp \
-  $(SRCDIR)/call_selector.cpp \
 
 # Executable sources
 BIN_SRC := $(SRCDIR)/ir_to_mips.cpp

@@ -1,8 +1,4 @@
 #include "instruction_selector.hpp"
-#include "arithmetic_selector.hpp"
-#include "branch_selector.hpp"
-#include "memory_selector.hpp"
-#include "call_selector.hpp"
 
 #include <fstream>
 #include <sstream>
@@ -170,6 +166,8 @@ SelectionContext::generateFunctionEpilogue(const IRFunction& func) {
 namespace {
     struct FrameInfo {
         std::unordered_map<std::string,int> varOffset; // offset from $fp (>=8)
+        std::unordered_set<std::string> paramArrayNames; // array params passed by pointer
+        std::unordered_set<std::string> localArrayNames; // arrays allocated in frame
         int frameBytes{0};
     };
 
@@ -177,16 +175,26 @@ namespace {
         FrameInfo fi;
         // Reserve 8 bytes at frame top: 0($fp)=ra, 4($fp)=fp
         int off = 8;
-        auto slotSize = [&](std::shared_ptr<IRType> t){
-            if (std::dynamic_pointer_cast<IRArrayType>(t)) {
-                auto arr = std::static_pointer_cast<IRArrayType>(t);
-                return arr->size * 4; // 4B elements
+        // Mark which variables are array parameters
+        std::unordered_set<std::string> paramNames;
+        for (const auto& p : func.parameters) if (p) paramNames.insert(p->getName());
+
+        auto slotSize = [&](const std::shared_ptr<IRVariableOperand>& v){
+            auto arr = std::dynamic_pointer_cast<IRArrayType>(v->type);
+            if (!arr) return 4; // scalars
+            if (paramNames.count(v->getName())) {
+                // Array parameter: store pointer only
+                fi.paramArrayNames.insert(v->getName());
+                return 4;
             }
-            return 4;
+            // Local array: allocate full space in frame
+            fi.localArrayNames.insert(v->getName());
+            return arr->size * 4;
         };
+
         for (const auto& v : func.variables) {
             if (!v) continue;
-            int sz = slotSize(v->type);
+            int sz = slotSize(v);
             fi.varOffset[v->getName()] = off;
             off += sz;
         }
@@ -234,7 +242,7 @@ IRToMIPSSelector::selectProgram(const IRProgram& program) {
             Registers::fp(), Registers::sp()
         });
 
-        // Store first 4 parameters to their slots
+        // Store first 4 parameters to their slots (scalars copied; arrays store pointer)
         for (size_t i = 0; i < std::min<size_t>(4, F.parameters.size()); ++i) {
             auto p = F.parameters[i]; if (!p) continue;
             auto it = fi.varOffset.find(p->getName());
@@ -258,10 +266,19 @@ IRToMIPSSelector::selectProgram(const IRProgram& program) {
                     dst, std::make_shared<Immediate>(val)
                 });
             } else if (auto v = std::dynamic_pointer_cast<IRVariableOperand>(op)) {
-                int off = fi.varOffset[v->getName()];
-                code.emplace_back(MIPSOp::LW, "", std::vector<std::shared_ptr<MIPSOperand>>{
-                    dst, std::make_shared<Address>(off, Registers::fp())
-                });
+                // Scalar load (arrays are handled in array ops or passed as pointers in calls)
+                if (std::dynamic_pointer_cast<IRArrayType>(v->type)) {
+                    // Load base pointer from slot (for array params) into dst
+                    int off = fi.varOffset[v->getName()];
+                    code.emplace_back(MIPSOp::LW, "", std::vector<std::shared_ptr<MIPSOperand>>{
+                        dst, std::make_shared<Address>(off, Registers::fp())
+                    });
+                } else {
+                    int off = fi.varOffset[v->getName()];
+                    code.emplace_back(MIPSOp::LW, "", std::vector<std::shared_ptr<MIPSOperand>>{
+                        dst, std::make_shared<Address>(off, Registers::fp())
+                    });
+                }
             }
         };
 
@@ -372,8 +389,26 @@ IRToMIPSSelector::selectProgram(const IRProgram& program) {
                     // normal call: pass up to 4 args
                     static std::shared_ptr<Register> aRegs[4] = { Registers::a0(), Registers::a1(), Registers::a2(), Registers::a3() };
                     for (size_t a = 0; a < 4 && idx + a < ir->operands.size(); ++a) {
+                        auto arg = ir->operands[idx + a];
+                        if (auto v = std::dynamic_pointer_cast<IRVariableOperand>(arg)) {
+                            if (std::dynamic_pointer_cast<IRArrayType>(v->type)) {
+                                int base = fi.varOffset[v->getName()];
+                                if (fi.paramArrayNames.count(v->getName())) {
+                                    // Array parameter: slot holds pointer; load it
+                                    code.emplace_back(MIPSOp::LW, "", std::vector<std::shared_ptr<MIPSOperand>>{
+                                        aRegs[a], std::make_shared<Address>(base, Registers::fp())
+                                    });
+                                } else {
+                                    // Local array: pass address of frame slot
+                                    code.emplace_back(MIPSOp::ADDI, "", std::vector<std::shared_ptr<MIPSOperand>>{
+                                        aRegs[a], Registers::fp(), std::make_shared<Immediate>(base)
+                                    });
+                                }
+                                continue;
+                            }
+                        }
                         auto t = Registers::t0();
-                        loadOp(ir->operands[idx + a], t, code);
+                        loadOp(arg, t, code);
                         code.emplace_back(MIPSOp::MOVE, "", std::vector<std::shared_ptr<MIPSOperand>>{ aRegs[a], t });
                     }
                     code.emplace_back(MIPSOp::JAL, "", std::vector<std::shared_ptr<MIPSOperand>>{
@@ -402,12 +437,21 @@ IRToMIPSSelector::selectProgram(const IRProgram& program) {
                     auto tAddr = Registers::t2();
                     loadOp(ir->operands[0], tVal, code);
                     auto arrVar = std::dynamic_pointer_cast<IRVariableOperand>(ir->operands[1]);
-                    int base = fi.varOffset[arrVar->getName()];
                     loadOp(ir->operands[2], tIdx, code);
-                    // tAddr = tIdx << 2; tAddr = tAddr + $fp; sw tVal, base(tAddr)
+                    // Compute address base: param-array -> load base pointer; local array -> $fp + baseOffset
+                    std::shared_ptr<Register> baseReg = Registers::t3();
+                    int baseOff = fi.varOffset[arrVar->getName()];
+                    if (fi.paramArrayNames.count(arrVar->getName())) {
+                        // load pointer from slot
+                        code.emplace_back(MIPSOp::LW, "", std::vector<std::shared_ptr<MIPSOperand>>{ baseReg, std::make_shared<Address>(baseOff, Registers::fp()) });
+                    } else {
+                        // compute frame base address
+                        code.emplace_back(MIPSOp::ADDI, "", std::vector<std::shared_ptr<MIPSOperand>>{ baseReg, Registers::fp(), std::make_shared<Immediate>(baseOff) });
+                    }
+                    // tAddr = baseReg + (idx<<2)
                     code.emplace_back(MIPSOp::SLL, "", std::vector<std::shared_ptr<MIPSOperand>>{ tAddr, tIdx, std::make_shared<Immediate>(2) });
-                    code.emplace_back(MIPSOp::ADD, "", std::vector<std::shared_ptr<MIPSOperand>>{ tAddr, tAddr, Registers::fp() });
-                    code.emplace_back(MIPSOp::SW,  "", std::vector<std::shared_ptr<MIPSOperand>>{ tVal, std::make_shared<Address>(base, tAddr) });
+                    code.emplace_back(MIPSOp::ADD, "", std::vector<std::shared_ptr<MIPSOperand>>{ tAddr, baseReg, tAddr });
+                    code.emplace_back(MIPSOp::SW,  "", std::vector<std::shared_ptr<MIPSOperand>>{ tVal, std::make_shared<Address>(0, tAddr) });
                     break;
                 }
                 case IRInstruction::OpCode::ARRAY_LOAD: {
@@ -417,11 +461,18 @@ IRToMIPSSelector::selectProgram(const IRProgram& program) {
                     auto tAddr = Registers::t1();
                     auto tVal = Registers::t2();
                     auto arrVar = std::dynamic_pointer_cast<IRVariableOperand>(ir->operands[1]);
-                    int base = fi.varOffset[arrVar->getName()];
                     loadOp(ir->operands[2], tIdx, code);
+                    // Compute base like in store
+                    std::shared_ptr<Register> baseReg = Registers::t3();
+                    int baseOff = fi.varOffset[arrVar->getName()];
+                    if (fi.paramArrayNames.count(arrVar->getName())) {
+                        code.emplace_back(MIPSOp::LW, "", std::vector<std::shared_ptr<MIPSOperand>>{ baseReg, std::make_shared<Address>(baseOff, Registers::fp()) });
+                    } else {
+                        code.emplace_back(MIPSOp::ADDI, "", std::vector<std::shared_ptr<MIPSOperand>>{ baseReg, Registers::fp(), std::make_shared<Immediate>(baseOff) });
+                    }
                     code.emplace_back(MIPSOp::SLL, "", std::vector<std::shared_ptr<MIPSOperand>>{ tAddr, tIdx, std::make_shared<Immediate>(2) });
-                    code.emplace_back(MIPSOp::ADD, "", std::vector<std::shared_ptr<MIPSOperand>>{ tAddr, tAddr, Registers::fp() });
-                    code.emplace_back(MIPSOp::LW,  "", std::vector<std::shared_ptr<MIPSOperand>>{ tVal, std::make_shared<Address>(base, tAddr) });
+                    code.emplace_back(MIPSOp::ADD, "", std::vector<std::shared_ptr<MIPSOperand>>{ tAddr, baseReg, tAddr });
+                    code.emplace_back(MIPSOp::LW,  "", std::vector<std::shared_ptr<MIPSOperand>>{ tVal, std::make_shared<Address>(0, tAddr) });
                     storeVar(dst->getName(), tVal, code);
                     break;
                 }
@@ -479,50 +530,8 @@ InstructionSelector::getRegisterForOperand(std::shared_ptr<IROperand> irOp,
 }
 
 std::vector<MIPSInstruction>
-IRToMIPSSelector::selectInstruction(const IRInstruction& instruction, SelectionContext& ctx) {
-    // Use dedicated sub-selectors to keep this dispatcher lean
-    static ArithmeticSelector arithSel;
-    static MemorySelector     memSel;
-    static BranchSelector     brSel;
-    static CallSelector       callSel;
-
-    // Group opcodes roughly by domain, then delegate
-    switch (instruction.opCode) {
-        // Arithmetic / logic
-        case IRInstruction::OpCode::ADD:
-        case IRInstruction::OpCode::SUB:
-        case IRInstruction::OpCode::MULT:
-        case IRInstruction::OpCode::DIV:
-        case IRInstruction::OpCode::AND:
-        case IRInstruction::OpCode::OR:
-            return arithSel.select(instruction, ctx);
-
-        // Memory / assignment
-        case IRInstruction::OpCode::ASSIGN:
-        case IRInstruction::OpCode::ARRAY_STORE:
-        case IRInstruction::OpCode::ARRAY_LOAD:
-            return memSel.select(instruction, ctx);
-
-        // Branching & labels
-        case IRInstruction::OpCode::BREQ:
-        case IRInstruction::OpCode::BRNEQ:
-        case IRInstruction::OpCode::BRLT:
-        case IRInstruction::OpCode::BRGT:
-        case IRInstruction::OpCode::BRGEQ:
-        case IRInstruction::OpCode::GOTO:
-        case IRInstruction::OpCode::LABEL:
-            return brSel.select(instruction, ctx);
-
-        // Calls / returns
-        case IRInstruction::OpCode::CALL:
-        case IRInstruction::OpCode::CALLR:
-        case IRInstruction::OpCode::RETURN:
-            return callSel.select(instruction, ctx);
-
-        default:
-            // Not recognized / NOP for now
+IRToMIPSSelector::selectInstruction(const IRInstruction& /*instruction*/, SelectionContext& /*ctx*/) {
             return {};
-    }
 }
 
 std::string
