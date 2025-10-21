@@ -165,20 +165,6 @@ static void emitGreedyBody(const IRFunction& F, const FrameInfo& fi, std::vector
         return fi.varOffset.count(v->getName()) > 0;
     };
 
-    auto emitOpWithRegs = [&](const std::shared_ptr<IROperand>& op,
-                              const std::unordered_map<std::string,std::shared_ptr<Register>>& map,
-                              const std::shared_ptr<Register>& tmp,
-                              std::vector<MIPSInstruction>& code){
-        if (auto v = std::dynamic_pointer_cast<IRVariableOperand>(op)) {
-            auto it = map.find(v->getName());
-            if (it != map.end()) {
-                if (tmp) code.emplace_back(MIPSOp::MOVE, "", std::vector<std::shared_ptr<MIPSOperand>>{ tmp, it->second });
-                return;
-            }
-        }
-        if (tmp) loadOp(op, tmp, code);
-    };
-
     for (const auto& br : blocks) {
         int bi = br.first, bj = br.second;
         if (bi > bj) continue;
@@ -189,27 +175,199 @@ static void emitGreedyBody(const IRFunction& F, const FrameInfo& fi, std::vector
             out.emplace_back(MIPSOp::SLL, Lb, std::vector<std::shared_ptr<MIPSOperand>>{ Registers::zero(), Registers::zero(), std::make_shared<Immediate>(0) });
         }
 
-        std::unordered_map<std::string,int> useCnt;
-        for (int i = bi; i <= bj; ++i) {
-            auto inst = F.instructions[i]; if (!inst) continue;
-            for (auto& op : inst->operands) {
-                if (isScalarVar(op)) {
+        // Build per-position next-use information (after position i)
+        const int INF = 1000000000;
+        std::vector<std::unordered_map<std::string,int>> nextUseAt(bj - bi + 1);
+        std::unordered_map<std::string,int> currNext;
+        auto addUse = [&](const std::shared_ptr<IROperand>& op, int pos){
+            if (!isScalarVar(op)) return;
                     auto v = std::dynamic_pointer_cast<IRVariableOperand>(op);
-                    useCnt[v->getName()]++;
+            currNext[v->getName()] = pos;
+        };
+        auto getDefName = [&](const std::shared_ptr<IRInstruction>& ir)->std::string{
+            switch (ir->opCode) {
+                case IRInstruction::OpCode::ASSIGN: {
+                    auto dst = std::dynamic_pointer_cast<IRVariableOperand>(ir->operands[0]);
+                    if (dst && !std::dynamic_pointer_cast<IRArrayType>(dst->type)) return dst->getName();
+                    return std::string();
                 }
+                case IRInstruction::OpCode::ADD:
+                case IRInstruction::OpCode::SUB:
+                case IRInstruction::OpCode::MULT:
+                case IRInstruction::OpCode::DIV:
+                case IRInstruction::OpCode::AND:
+                case IRInstruction::OpCode::OR: {
+                    auto dst = std::dynamic_pointer_cast<IRVariableOperand>(ir->operands[0]);
+                    if (dst && !std::dynamic_pointer_cast<IRArrayType>(dst->type)) return dst->getName();
+                    return std::string();
+                }
+                case IRInstruction::OpCode::ARRAY_LOAD: {
+                    auto dst = std::dynamic_pointer_cast<IRVariableOperand>(ir->operands[0]);
+                    if (dst && !std::dynamic_pointer_cast<IRArrayType>(dst->type)) return dst->getName();
+                    return std::string();
+                }
+                case IRInstruction::OpCode::CALLR: {
+                    auto dst = std::dynamic_pointer_cast<IRVariableOperand>(ir->operands[0]);
+                    if (dst && !std::dynamic_pointer_cast<IRArrayType>(dst->type)) return dst->getName();
+                    return std::string();
+                }
+                default: return std::string();
+            }
+        };
+
+        for (int i = bj; i >= bi; --i) {
+            auto ir = F.instructions[i]; if (!ir) { if (i - bi >= 0) nextUseAt[i - bi] = currNext; continue; }
+            // snapshot of next use AFTER position i
+            nextUseAt[i - bi] = currNext;
+            // defs kill previous next-use
+            auto def = getDefName(ir);
+            if (!def.empty()) currNext[def] = INF;
+            // uses at i
+            switch (ir->opCode) {
+                case IRInstruction::OpCode::ASSIGN: {
+                    if (ir->operands.size() >= 2) addUse(ir->operands[1], i);
+                    if (ir->operands.size() == 3) addUse(ir->operands[2], i); // array bulk init count/value
+                    break;
+                }
+                case IRInstruction::OpCode::ADD:
+                case IRInstruction::OpCode::SUB:
+                case IRInstruction::OpCode::MULT:
+                case IRInstruction::OpCode::DIV:
+                case IRInstruction::OpCode::AND:
+                case IRInstruction::OpCode::OR: {
+                    addUse(ir->operands[1], i);
+                    addUse(ir->operands[2], i);
+                    break;
+                }
+                case IRInstruction::OpCode::ARRAY_STORE: {
+                    addUse(ir->operands[0], i);
+                    addUse(ir->operands[2], i);
+                    break;
+                }
+                case IRInstruction::OpCode::ARRAY_LOAD: {
+                    addUse(ir->operands[2], i);
+                    break;
+                }
+                case IRInstruction::OpCode::BREQ:
+                case IRInstruction::OpCode::BRNEQ:
+                case IRInstruction::OpCode::BRLT:
+                case IRInstruction::OpCode::BRGT:
+                case IRInstruction::OpCode::BRGEQ: {
+                    addUse(ir->operands[1], i);
+                    addUse(ir->operands[2], i);
+                    break;
+                }
+                case IRInstruction::OpCode::RETURN: {
+                    addUse(ir->operands[0], i);
+                    break;
+                }
+                case IRInstruction::OpCode::CALL:
+                case IRInstruction::OpCode::CALLR: {
+                    size_t idx = (ir->opCode == IRInstruction::OpCode::CALLR) ? 2 : 1;
+                    for (size_t a = idx; a < ir->operands.size(); ++a) addUse(ir->operands[a], i);
+                    break;
+                }
+                default: break;
             }
         }
-        std::vector<std::pair<std::string,int>> pairs(useCnt.begin(), useCnt.end());
-        std::sort(pairs.begin(), pairs.end(), [](auto& a, auto& b){ return a.second > b.second; });
-        size_t K = std::min(pairs.size(), allocRegs.size());
-        std::unordered_map<std::string,std::shared_ptr<Register>> regMap;
-        for (size_t i = 0; i < K; ++i) regMap[pairs[i].first] = allocRegs[i];
 
-        // Load mapped vars at block entry
-        for (auto& kv : regMap) {
-            int off = fi.varOffset.at(kv.first);
-            out.emplace_back(MIPSOp::LW, "", std::vector<std::shared_ptr<MIPSOperand>>{ kv.second, std::make_shared<Address>(off, Registers::fp()) });
-        }
+        // Dynamic register mapping for this block
+        struct Slot { std::shared_ptr<Register> reg; std::string var; bool occupied = false; bool dirty = false; };
+        std::vector<Slot> slots(allocRegs.size());
+        for (size_t s = 0; s < allocRegs.size(); ++s) slots[s].reg = allocRegs[s];
+        std::unordered_map<std::string,int> varToSlot;
+
+        auto spillSlot = [&](int si, std::vector<MIPSInstruction>& code){
+            if (!slots[si].occupied) return;
+            if (slots[si].dirty) {
+                int off = fi.varOffset.at(slots[si].var);
+                code.emplace_back(MIPSOp::SW, "", std::vector<std::shared_ptr<MIPSOperand>>{ slots[si].reg, std::make_shared<Address>(off, Registers::fp()) });
+            }
+            varToSlot.erase(slots[si].var);
+            slots[si].occupied = false;
+            slots[si].dirty = false;
+            slots[si].var.clear();
+        };
+
+        auto flushAllDirty = [&](std::vector<MIPSInstruction>& code){
+            for (size_t si = 0; si < slots.size(); ++si) {
+                if (slots[si].occupied && slots[si].dirty) {
+                    int off = fi.varOffset.at(slots[si].var);
+                    code.emplace_back(MIPSOp::SW, "", std::vector<std::shared_ptr<MIPSOperand>>{ slots[si].reg, std::make_shared<Address>(off, Registers::fp()) });
+                    slots[si].dirty = false;
+                }
+            }
+        };
+
+        auto clearAllMappings = [&](){
+            varToSlot.clear();
+            for (auto& sl : slots) { sl.occupied = false; sl.dirty = false; sl.var.clear(); }
+        };
+
+        auto chooseVictim = [&](int i)->int{
+            for (int s = 0; s < (int)slots.size(); ++s) if (!slots[s].occupied) return s;
+            int best = 0; int bestNu = -1;
+            auto& map = nextUseAt[i - bi];
+            for (int s = 0; s < (int)slots.size(); ++s) {
+                int nu = INF;
+                auto it = map.find(slots[s].var);
+                if (it != map.end()) nu = it->second;
+                if (nu > bestNu) { bestNu = nu; best = s; }
+            }
+            return best;
+        };
+
+        auto ensureVarRegForRead = [&](const std::string& name, int i, std::vector<MIPSInstruction>& code)->std::shared_ptr<Register>{
+            auto it = varToSlot.find(name);
+            if (it != varToSlot.end()) return slots[it->second].reg;
+            int si = chooseVictim(i);
+            if (slots[si].occupied) spillSlot(si, code);
+            int off = fi.varOffset.at(name);
+            code.emplace_back(MIPSOp::LW, "", std::vector<std::shared_ptr<MIPSOperand>>{ slots[si].reg, std::make_shared<Address>(off, Registers::fp()) });
+            slots[si].occupied = true; slots[si].dirty = false; slots[si].var = name;
+            varToSlot[name] = si;
+            return slots[si].reg;
+        };
+
+        auto ensureVarRegForWrite = [&](const std::string& name, int i, std::vector<MIPSInstruction>& code)->std::shared_ptr<Register>{
+            auto it = varToSlot.find(name);
+            if (it != varToSlot.end()) return slots[it->second].reg;
+            int si = chooseVictim(i);
+            if (slots[si].occupied) spillSlot(si, code);
+            slots[si].occupied = true; slots[si].dirty = false; slots[si].var = name;
+            varToSlot[name] = si;
+            return slots[si].reg;
+        };
+
+        auto freeIfLastUse = [&](const std::string& name, int i, std::vector<MIPSInstruction>& code){
+            auto itMap = nextUseAt[i - bi].find(name);
+            int nu = (itMap == nextUseAt[i - bi].end()) ? INF : itMap->second;
+            if (nu == INF) {
+                auto it = varToSlot.find(name);
+                if (it != varToSlot.end()) {
+                    int si = it->second;
+                    if (slots[si].dirty) {
+                        int off = fi.varOffset.at(name);
+                        code.emplace_back(MIPSOp::SW, "", std::vector<std::shared_ptr<MIPSOperand>>{ slots[si].reg, std::make_shared<Address>(off, Registers::fp()) });
+                    }
+                    varToSlot.erase(name);
+                    slots[si].occupied = false; slots[si].dirty = false; slots[si].var.clear();
+                }
+            }
+        };
+
+        auto getOpIntoTemp = [&](const std::shared_ptr<IROperand>& op, const std::shared_ptr<Register>& tmp, int i, std::vector<MIPSInstruction>& code){
+            if (auto v = std::dynamic_pointer_cast<IRVariableOperand>(op)) {
+                if (!std::dynamic_pointer_cast<IRArrayType>(v->type)) {
+                    auto r = ensureVarRegForRead(v->getName(), i, code);
+                    if (r->toString() != tmp->toString()) code.emplace_back(MIPSOp::MOVE, "", std::vector<std::shared_ptr<MIPSOperand>>{ tmp, r });
+                    freeIfLastUse(v->getName(), i, code);
+                    return; // value now in tmp
+                }
+            }
+            // constants or non-scalar variables
+            loadOp(op, tmp, code);
+        };
 
         for (int i = bi; i <= bj; ++i) {
             auto ir = F.instructions[i]; if (!ir) continue;
@@ -224,8 +382,8 @@ static void emitGreedyBody(const IRFunction& F, const FrameInfo& fi, std::vector
                         auto tIdx  = Registers::t2();
                         auto tAddr = Registers::t3();
                         auto baseR = Registers::t4();
-                        emitOpWithRegs(ir->operands[1], regMap, tCnt, code);
-                        emitOpWithRegs(ir->operands[2], regMap, tVal, code);
+                        getOpIntoTemp(ir->operands[1], tCnt, i, code);
+                        getOpIntoTemp(ir->operands[2], tVal, i, code);
                         code.emplace_back(MIPSOp::LI, "", std::vector<std::shared_ptr<MIPSOperand>>{ tIdx, std::make_shared<Immediate>(0) });
                         int baseOff = fi.varOffset.at(dst->getName());
                         if (fi.paramArrayNames.count(dst->getName())) {
@@ -245,24 +403,25 @@ static void emitGreedyBody(const IRFunction& F, const FrameInfo& fi, std::vector
                         code.emplace_back(MIPSOp::J, "", std::vector<std::shared_ptr<MIPSOperand>>{ std::make_shared<Label>(Lloop) });
                         code.emplace_back(MIPSOp::SLL, Lend, std::vector<std::shared_ptr<MIPSOperand>>{ Registers::zero(), Registers::zero(), std::make_shared<Immediate>(0) });
                     } else {
-                        auto it = regMap.find(dst ? dst->getName() : std::string());
-                        if (it != regMap.end()) {
-                            auto dstR = it->second;
+                        if (!dst) break;
+                        auto dstR = ensureVarRegForWrite(dst->getName(), i, code);
                             if (auto c = std::dynamic_pointer_cast<IRConstantOperand>(ir->operands[1])) {
                                 int val = std::stoi(c->getValueString());
                                 code.emplace_back(MIPSOp::LI, "", std::vector<std::shared_ptr<MIPSOperand>>{ dstR, std::make_shared<Immediate>(val) });
                             } else if (auto v = std::dynamic_pointer_cast<IRVariableOperand>(ir->operands[1])) {
-                                auto it2 = regMap.find(v->getName());
-                                if (it2 != regMap.end()) code.emplace_back(MIPSOp::MOVE, "", std::vector<std::shared_ptr<MIPSOperand>>{ dstR, it2->second });
-                                else {
+                            if (!std::dynamic_pointer_cast<IRArrayType>(v->type)) {
+                                auto srcR = ensureVarRegForRead(v->getName(), i, code);
+                                if (srcR->toString() != dstR->toString()) code.emplace_back(MIPSOp::MOVE, "", std::vector<std::shared_ptr<MIPSOperand>>{ dstR, srcR });
+                                freeIfLastUse(v->getName(), i, code);
+                            } else {
                                     auto t0 = Registers::t0(); loadOp(ir->operands[1], t0, code);
                                     code.emplace_back(MIPSOp::MOVE, "", std::vector<std::shared_ptr<MIPSOperand>>{ dstR, t0 });
                                 }
                             }
-                        } else {
-                            auto t0 = Registers::t0();
-                            loadOp(ir->operands[1], t0, code);
-                            storeVar(dst->getName(), t0, code);
+                        // mark dst dirty
+                        {
+                            auto itSlot = varToSlot.find(dst->getName());
+                            if (itSlot != varToSlot.end()) slots[itSlot->second].dirty = true;
                         }
                     }
                     break;
@@ -274,18 +433,19 @@ static void emitGreedyBody(const IRFunction& F, const FrameInfo& fi, std::vector
                 case IRInstruction::OpCode::AND:
                 case IRInstruction::OpCode::OR: {
                     auto dst = std::dynamic_pointer_cast<IRVariableOperand>(ir->operands[0]);
-                    auto itDst = regMap.find(dst ? dst->getName() : std::string());
-                    auto rY = Registers::t0();
-                    auto rZ = Registers::t1();
-                    if (auto vy = std::dynamic_pointer_cast<IRVariableOperand>(ir->operands[1])) {
-                        auto it = regMap.find(vy->getName());
-                        if (it != regMap.end()) rY = it->second; else emitOpWithRegs(ir->operands[1], regMap, rY, code);
-                    } else emitOpWithRegs(ir->operands[1], regMap, rY, code);
-                    if (auto vz = std::dynamic_pointer_cast<IRVariableOperand>(ir->operands[2])) {
-                        auto it = regMap.find(vz->getName());
-                        if (it != regMap.end()) rZ = it->second; else emitOpWithRegs(ir->operands[2], regMap, rZ, code);
-                    } else emitOpWithRegs(ir->operands[2], regMap, rZ, code);
-                    auto rX = itDst != regMap.end() ? itDst->second : Registers::t2();
+                    auto rYt = Registers::t0();
+                    auto rZt = Registers::t1();
+                    std::shared_ptr<Register> rY;
+                    std::shared_ptr<Register> rZ;
+                    if (isScalarVar(ir->operands[1])) {
+                        auto vy = std::dynamic_pointer_cast<IRVariableOperand>(ir->operands[1]);
+                        rY = ensureVarRegForRead(vy->getName(), i, code);
+                    } else { rY = rYt; getOpIntoTemp(ir->operands[1], rYt, i, code); }
+                    if (isScalarVar(ir->operands[2])) {
+                        auto vz = std::dynamic_pointer_cast<IRVariableOperand>(ir->operands[2]);
+                        rZ = ensureVarRegForRead(vz->getName(), i, code);
+                    } else { rZ = rZt; getOpIntoTemp(ir->operands[2], rZt, i, code); }
+                    auto rX = ensureVarRegForWrite(dst->getName(), i, code);
                     MIPSOp op = MIPSOp::ADD;
                     if (ir->opCode == IRInstruction::OpCode::SUB) op = MIPSOp::SUB;
                     else if (ir->opCode == IRInstruction::OpCode::MULT) op = MIPSOp::MUL;
@@ -293,16 +453,19 @@ static void emitGreedyBody(const IRFunction& F, const FrameInfo& fi, std::vector
                     else if (ir->opCode == IRInstruction::OpCode::AND) op = MIPSOp::AND;
                     else if (ir->opCode == IRInstruction::OpCode::OR)  op = MIPSOp::OR;
                     code.emplace_back(op, "", std::vector<std::shared_ptr<MIPSOperand>>{ rX, rY, rZ });
-                    if (itDst == regMap.end()) storeVar(dst->getName(), rX, code);
+                    {
+                        auto itSlot = varToSlot.find(dst->getName());
+                        if (itSlot != varToSlot.end()) slots[itSlot->second].dirty = true;
+                    }
+                    if (isScalarVar(ir->operands[1])) freeIfLastUse(std::dynamic_pointer_cast<IRVariableOperand>(ir->operands[1])->getName(), i, code);
+                    if (isScalarVar(ir->operands[2])) freeIfLastUse(std::dynamic_pointer_cast<IRVariableOperand>(ir->operands[2])->getName(), i, code);
                     break;
                 }
                 case IRInstruction::OpCode::GOTO: {
                     auto lbl = std::dynamic_pointer_cast<IRLabelOperand>(ir->operands[0]);
-                    for (auto& kv : regMap) {
-                        int off = fi.varOffset.at(kv.first);
-                        code.emplace_back(MIPSOp::SW, "", std::vector<std::shared_ptr<MIPSOperand>>{ kv.second, std::make_shared<Address>(off, Registers::fp()) });
-                    }
+                    flushAllDirty(code);
                     code.emplace_back(MIPSOp::J, "", std::vector<std::shared_ptr<MIPSOperand>>{ std::make_shared<Label>(qualLabel(F.name, lbl->getName())) });
+                    clearAllMappings();
                     break;
                 }
                 case IRInstruction::OpCode::BREQ:
@@ -312,17 +475,14 @@ static void emitGreedyBody(const IRFunction& F, const FrameInfo& fi, std::vector
                 case IRInstruction::OpCode::BRGEQ: {
                     auto lbl = std::dynamic_pointer_cast<IRLabelOperand>(ir->operands[0]);
                     auto rA = Registers::t0(); auto rB = Registers::t1();
-                    emitOpWithRegs(ir->operands[1], regMap, rA, code);
-                    emitOpWithRegs(ir->operands[2], regMap, rB, code);
+                    getOpIntoTemp(ir->operands[1], rA, i, code);
+                    getOpIntoTemp(ir->operands[2], rB, i, code);
                     MIPSOp bop = MIPSOp::BEQ;
                     if (ir->opCode == IRInstruction::OpCode::BRNEQ) bop = MIPSOp::BNE;
                     else if (ir->opCode == IRInstruction::OpCode::BRLT) bop = MIPSOp::BLT;
                     else if (ir->opCode == IRInstruction::OpCode::BRGT) bop = MIPSOp::BGT;
                     else if (ir->opCode == IRInstruction::OpCode::BRGEQ) bop = MIPSOp::BGE;
-                    for (auto& kv : regMap) {
-                        int off = fi.varOffset.at(kv.first);
-                        code.emplace_back(MIPSOp::SW, "", std::vector<std::shared_ptr<MIPSOperand>>{ kv.second, std::make_shared<Address>(off, Registers::fp()) });
-                    }
+                    flushAllDirty(code);
                     code.emplace_back(bop, "", std::vector<std::shared_ptr<MIPSOperand>>{ rA, rB, std::make_shared<Label>(qualLabel(F.name, lbl->getName())) });
                     break;
                 }
@@ -336,9 +496,7 @@ static void emitGreedyBody(const IRFunction& F, const FrameInfo& fi, std::vector
                         code.emplace_back(MIPSOp::SYSCALL, "", std::vector<std::shared_ptr<MIPSOperand>>{});
                         if (ir->opCode == IRInstruction::OpCode::CALLR) {
                             auto dst = std::dynamic_pointer_cast<IRVariableOperand>(ir->operands[0]);
-                            auto it = regMap.find(dst ? dst->getName() : std::string());
-                            if (it != regMap.end()) code.emplace_back(MIPSOp::MOVE, "", std::vector<std::shared_ptr<MIPSOperand>>{ it->second, Registers::v0() });
-                            else storeVar(dst->getName(), Registers::v0(), code);
+                            storeVar(dst->getName(), Registers::v0(), code);
                         }
                         break;
                     }
@@ -347,15 +505,13 @@ static void emitGreedyBody(const IRFunction& F, const FrameInfo& fi, std::vector
                         code.emplace_back(MIPSOp::SYSCALL, "", std::vector<std::shared_ptr<MIPSOperand>>{});
                         if (ir->opCode == IRInstruction::OpCode::CALLR) {
                             auto dst = std::dynamic_pointer_cast<IRVariableOperand>(ir->operands[0]);
-                            auto it = regMap.find(dst ? dst->getName() : std::string());
-                            if (it != regMap.end()) code.emplace_back(MIPSOp::MOVE, "", std::vector<std::shared_ptr<MIPSOperand>>{ it->second, Registers::v0() });
-                            else storeVar(dst->getName(), Registers::v0(), code);
+                            storeVar(dst->getName(), Registers::v0(), code);
                         }
                         break;
                     }
                     if (callee == "puti" || callee == "putc") {
                         auto t0 = Registers::t0();
-                        if (idxArg < ir->operands.size()) emitOpWithRegs(ir->operands[idxArg], regMap, t0, code);
+                        if (idxArg < ir->operands.size()) getOpIntoTemp(ir->operands[idxArg], t0, i, code);
                         code.emplace_back(MIPSOp::MOVE, "", std::vector<std::shared_ptr<MIPSOperand>>{ Registers::a0(), t0 });
                         int sc = (callee == "puti") ? 1 : 11;
                         code.emplace_back(MIPSOp::LI, "", std::vector<std::shared_ptr<MIPSOperand>>{ Registers::v0(), std::make_shared<Immediate>(sc) });
@@ -380,10 +536,7 @@ static void emitGreedyBody(const IRFunction& F, const FrameInfo& fi, std::vector
                         break;
                     }
                     static std::shared_ptr<Register> aRegs[4] = { Registers::a0(), Registers::a1(), Registers::a2(), Registers::a3() };
-                    for (auto& kv : regMap) {
-                        int off = fi.varOffset.at(kv.first);
-                        code.emplace_back(MIPSOp::SW, "", std::vector<std::shared_ptr<MIPSOperand>>{ kv.second, std::make_shared<Address>(off, Registers::fp()) });
-                    }
+                    flushAllDirty(code);
                     for (size_t a = 0; a < 4 && idxArg + a < ir->operands.size(); ++a) {
                         auto arg = ir->operands[idxArg + a];
                         if (auto v = std::dynamic_pointer_cast<IRVariableOperand>(arg)) {
@@ -398,7 +551,7 @@ static void emitGreedyBody(const IRFunction& F, const FrameInfo& fi, std::vector
                             }
                         }
                         auto t = Registers::t0();
-                        emitOpWithRegs(arg, regMap, t, code);
+                        getOpIntoTemp(arg, t, i, code);
                         code.emplace_back(MIPSOp::MOVE, "", std::vector<std::shared_ptr<MIPSOperand>>{ aRegs[a], t });
                     }
                     if (idxArg + 4 < ir->operands.size()) {
@@ -407,7 +560,7 @@ static void emitGreedyBody(const IRFunction& F, const FrameInfo& fi, std::vector
                         for (size_t a = extraStart; a < ir->operands.size(); ++a) extras.push_back(ir->operands[a]);
                         for (size_t r = extras.size(); r-- > 0; ) {
                             auto t = Registers::t0();
-                            emitOpWithRegs(extras[r], regMap, t, code);
+                            getOpIntoTemp(extras[r], t, i, code);
                             code.emplace_back(MIPSOp::ADDI, "", std::vector<std::shared_ptr<MIPSOperand>>{ Registers::sp(), Registers::sp(), std::make_shared<Immediate>(-4) });
                             code.emplace_back(MIPSOp::SW, "", std::vector<std::shared_ptr<MIPSOperand>>{ t, std::make_shared<Address>(0, Registers::sp()) });
                         }
@@ -417,15 +570,10 @@ static void emitGreedyBody(const IRFunction& F, const FrameInfo& fi, std::vector
                         int extra = int(ir->operands.size() - (idxArg + 4));
                         code.emplace_back(MIPSOp::ADDI, "", std::vector<std::shared_ptr<MIPSOperand>>{ Registers::sp(), Registers::sp(), std::make_shared<Immediate>(extra * 4) });
                     }
-                    for (auto& kv : regMap) {
-                        int off = fi.varOffset.at(kv.first);
-                        code.emplace_back(MIPSOp::LW, "", std::vector<std::shared_ptr<MIPSOperand>>{ kv.second, std::make_shared<Address>(off, Registers::fp()) });
-                    }
+                    clearAllMappings();
                     if (ir->opCode == IRInstruction::OpCode::CALLR) {
                         auto dst = std::dynamic_pointer_cast<IRVariableOperand>(ir->operands[0]);
-                        auto it = regMap.find(dst ? dst->getName() : std::string());
-                        if (it != regMap.end()) code.emplace_back(MIPSOp::MOVE, "", std::vector<std::shared_ptr<MIPSOperand>>{ it->second, Registers::v0() });
-                        else storeVar(dst->getName(), Registers::v0(), code);
+                        storeVar(dst->getName(), Registers::v0(), code);
                     }
                     break;
                 }
@@ -443,9 +591,9 @@ static void emitGreedyBody(const IRFunction& F, const FrameInfo& fi, std::vector
                             auto tVal = Registers::t0();
                             auto tIdx = Registers::t1();
                             auto tAddr = Registers::t2();
-                            emitOpWithRegs(ir->operands[0], regMap, tVal, code);
+                            getOpIntoTemp(ir->operands[0], tVal, i, code);
                             auto arrVar = std::dynamic_pointer_cast<IRVariableOperand>(ir->operands[1]);
-                            emitOpWithRegs(ir->operands[2], regMap, tIdx, code);
+                            getOpIntoTemp(ir->operands[2], tIdx, i, code);
                             std::shared_ptr<Register> baseReg = Registers::t3();
                             int baseOff = fi.varOffset.at(arrVar->getName());
                             if (fi.paramArrayNames.count(arrVar->getName())) {
@@ -456,6 +604,9 @@ static void emitGreedyBody(const IRFunction& F, const FrameInfo& fi, std::vector
                             code.emplace_back(MIPSOp::SLL, "", std::vector<std::shared_ptr<MIPSOperand>>{ tAddr, tIdx, std::make_shared<Immediate>(2) });
                             code.emplace_back(MIPSOp::ADD, "", std::vector<std::shared_ptr<MIPSOperand>>{ tAddr, baseReg, tAddr });
                             code.emplace_back(MIPSOp::SW,  "", std::vector<std::shared_ptr<MIPSOperand>>{ tVal, std::make_shared<Address>(0, tAddr) });
+                            // free last-use of operands
+                            if (isScalarVar(ir->operands[0])) freeIfLastUse(std::dynamic_pointer_cast<IRVariableOperand>(ir->operands[0])->getName(), i, code);
+                            if (isScalarVar(ir->operands[2])) freeIfLastUse(std::dynamic_pointer_cast<IRVariableOperand>(ir->operands[2])->getName(), i, code);
                             break;
                         }
                         case IRInstruction::OpCode::ARRAY_LOAD: {
@@ -464,7 +615,7 @@ static void emitGreedyBody(const IRFunction& F, const FrameInfo& fi, std::vector
                             auto tAddr = Registers::t1();
                             auto tVal = Registers::t2();
                             auto arrVar = std::dynamic_pointer_cast<IRVariableOperand>(ir->operands[1]);
-                            emitOpWithRegs(ir->operands[2], regMap, tIdx, code);
+                            getOpIntoTemp(ir->operands[2], tIdx, i, code);
                             std::shared_ptr<Register> baseReg = Registers::t3();
                             int baseOff = fi.varOffset.at(arrVar->getName());
                             if (fi.paramArrayNames.count(arrVar->getName())) {
@@ -475,14 +626,18 @@ static void emitGreedyBody(const IRFunction& F, const FrameInfo& fi, std::vector
                             code.emplace_back(MIPSOp::SLL, "", std::vector<std::shared_ptr<MIPSOperand>>{ tAddr, tIdx, std::make_shared<Immediate>(2) });
                             code.emplace_back(MIPSOp::ADD, "", std::vector<std::shared_ptr<MIPSOperand>>{ tAddr, baseReg, tAddr });
                             code.emplace_back(MIPSOp::LW,  "", std::vector<std::shared_ptr<MIPSOperand>>{ tVal, std::make_shared<Address>(0, tAddr) });
-                            auto it = regMap.find(dst ? dst->getName() : std::string());
-                            if (it != regMap.end()) code.emplace_back(MIPSOp::MOVE, "", std::vector<std::shared_ptr<MIPSOperand>>{ it->second, tVal });
-                            else storeVar(dst->getName(), tVal, code);
+                            auto rDst = ensureVarRegForWrite(dst->getName(), i, code);
+                            code.emplace_back(MIPSOp::MOVE, "", std::vector<std::shared_ptr<MIPSOperand>>{ rDst, tVal });
+                            {
+                                auto itSlot = varToSlot.find(dst->getName());
+                                if (itSlot != varToSlot.end()) slots[itSlot->second].dirty = true;
+                            }
+                            if (isScalarVar(ir->operands[2])) freeIfLastUse(std::dynamic_pointer_cast<IRVariableOperand>(ir->operands[2])->getName(), i, code);
                             break;
                         }
                         case IRInstruction::OpCode::RETURN: {
                             auto t0 = Registers::t0();
-                            emitOpWithRegs(ir->operands[0], regMap, t0, code);
+                            getOpIntoTemp(ir->operands[0], t0, i, code);
                             code.emplace_back(MIPSOp::MOVE, "", std::vector<std::shared_ptr<MIPSOperand>>{ Registers::v0(), t0 });
                             code.emplace_back(MIPSOp::J, "", std::vector<std::shared_ptr<MIPSOperand>>{ std::make_shared<Label>(F.name + std::string("_epilogue")) });
                             break;
@@ -494,12 +649,10 @@ static void emitGreedyBody(const IRFunction& F, const FrameInfo& fi, std::vector
             }
             out.insert(out.end(), code.begin(), code.end());
         }
-
         // Flush at block end
-        for (auto& kv : regMap) {
-            int off = fi.varOffset.at(kv.first);
-            out.emplace_back(MIPSOp::SW, "", std::vector<std::shared_ptr<MIPSOperand>>{ kv.second, std::make_shared<Address>(off, Registers::fp()) });
-        }
+        std::vector<MIPSInstruction> flush;
+        flushAllDirty(flush);
+        out.insert(out.end(), flush.begin(), flush.end());
     }
 }
 
